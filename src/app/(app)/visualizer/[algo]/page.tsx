@@ -43,7 +43,7 @@ export default async function AlgorithmPage({
         )}
       </div>
 
-      <Player algorithm={def} />
+      <Player algorithmId={def.id} />
     </div>
   );
 }

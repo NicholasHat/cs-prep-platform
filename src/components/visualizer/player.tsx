@@ -18,8 +18,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { buildTrace } from "@/lib/visualizer/engine";
+import { getAlgorithm } from "@/lib/visualizer/registry";
 import { usePlayback } from "@/lib/visualizer/store";
-import type { AlgorithmDef } from "@/lib/visualizer/types";
 import { ArrayRenderer } from "./array-renderer";
 import { GridRenderer } from "./grid-renderer";
 import { StackRenderer } from "./stack-renderer";
@@ -32,16 +32,20 @@ const SPEEDS = [
   { label: "8×", fps: 16 },
 ];
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function Player({ algorithm }: { algorithm: AlgorithmDef<any> }) {
+/**
+ * Client-side player. Takes only the algorithm id — the definition holds
+ * functions, which cannot cross the server→client prop boundary.
+ */
+export function Player({ algorithmId }: { algorithmId: string }) {
+  const algorithm = getAlgorithm(algorithmId);
   const [inputSeed, setInputSeed] = useState(0);
   const input = useMemo(
-    () => algorithm.createInput(),
+    () => algorithm?.createInput(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [algorithm.id, inputSeed],
+    [algorithmId, inputSeed],
   );
   const frames = useMemo(
-    () => buildTrace(algorithm.run(input as never)),
+    () => (algorithm ? buildTrace(algorithm.run(input as never)) : []),
     [algorithm, input],
   );
 
@@ -85,7 +89,7 @@ export function Player({ algorithm }: { algorithm: AlgorithmDef<any> }) {
   }, [toggle, stepForward, stepBack]);
 
   const frame = frames[Math.min(cursor, frames.length - 1)];
-  if (!frame) return null;
+  if (!algorithm || !frame) return null;
 
   return (
     <div className="space-y-4">
