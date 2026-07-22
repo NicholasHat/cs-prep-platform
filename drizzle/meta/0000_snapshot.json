@@ -1,0 +1,793 @@
+{
+  "id": "c4155c38-86f3-4959-8680-15fde9aae508",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.attempts": {
+      "name": "attempts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "problem_slug": {
+          "name": "problem_slug",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "date": {
+          "name": "date",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "duration_min": {
+          "name": "duration_min",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "attempt_outcome",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "attempts_problem_slug_problems_slug_fk": {
+          "name": "attempts_problem_slug_problems_slug_fk",
+          "tableFrom": "attempts",
+          "tableTo": "problems",
+          "columnsFrom": [
+            "problem_slug"
+          ],
+          "columnsTo": [
+            "slug"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.certificates": {
+      "name": "certificates",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "percent_complete": {
+          "name": "percent_complete",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "target_date": {
+          "name": "target_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "cert_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'in_progress'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.habit_rules": {
+      "name": "habit_rules",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "days_of_week": {
+          "name": "days_of_week",
+          "type": "smallint[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "start_time": {
+          "name": "start_time",
+          "type": "varchar(5)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "duration_min": {
+          "name": "duration_min",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "linked_problem_slug": {
+          "name": "linked_problem_slug",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "linked_topic": {
+          "name": "linked_topic",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "habit_rules_linked_problem_slug_problems_slug_fk": {
+          "name": "habit_rules_linked_problem_slug_problems_slug_fk",
+          "tableFrom": "habit_rules",
+          "tableTo": "problems",
+          "columnsFrom": [
+            "linked_problem_slug"
+          ],
+          "columnsTo": [
+            "slug"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.note_tags": {
+      "name": "note_tags",
+      "schema": "",
+      "columns": {
+        "note_id": {
+          "name": "note_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tag_id": {
+          "name": "tag_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "note_tags_note_id_notes_id_fk": {
+          "name": "note_tags_note_id_notes_id_fk",
+          "tableFrom": "note_tags",
+          "tableTo": "notes",
+          "columnsFrom": [
+            "note_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "note_tags_tag_id_tags_id_fk": {
+          "name": "note_tags_tag_id_tags_id_fk",
+          "tableFrom": "note_tags",
+          "tableTo": "tags",
+          "columnsFrom": [
+            "tag_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "note_tags_note_id_tag_id_pk": {
+          "name": "note_tags_note_id_tag_id_pk",
+          "columns": [
+            "note_id",
+            "tag_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.notes": {
+      "name": "notes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "problem_slug": {
+          "name": "problem_slug",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "topic": {
+          "name": "topic",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "notes_problem_slug_problems_slug_fk": {
+          "name": "notes_problem_slug_problems_slug_fk",
+          "tableFrom": "notes",
+          "tableTo": "problems",
+          "columnsFrom": [
+            "problem_slug"
+          ],
+          "columnsTo": [
+            "slug"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.problem_status": {
+      "name": "problem_status",
+      "schema": "",
+      "columns": {
+        "problem_slug": {
+          "name": "problem_slug",
+          "type": "varchar(128)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "problem_status_kind",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'not_started'"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "problem_status_problem_slug_problems_slug_fk": {
+          "name": "problem_status_problem_slug_problems_slug_fk",
+          "tableFrom": "problem_status",
+          "tableTo": "problems",
+          "columnsFrom": [
+            "problem_slug"
+          ],
+          "columnsTo": [
+            "slug"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.problems": {
+      "name": "problems",
+      "schema": "",
+      "columns": {
+        "slug": {
+          "name": "slug",
+          "type": "varchar(128)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category": {
+          "name": "category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "difficulty": {
+          "name": "difficulty",
+          "type": "difficulty",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "leetcode_url": {
+          "name": "leetcode_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "neetcode_url": {
+          "name": "neetcode_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.review_state": {
+      "name": "review_state",
+      "schema": "",
+      "columns": {
+        "problem_slug": {
+          "name": "problem_slug",
+          "type": "varchar(128)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "interval_days": {
+          "name": "interval_days",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "ease_factor": {
+          "name": "ease_factor",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 2.5
+        },
+        "repetitions": {
+          "name": "repetitions",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "due_date": {
+          "name": "due_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_reviewed_at": {
+          "name": "last_reviewed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "review_state_problem_slug_problems_slug_fk": {
+          "name": "review_state_problem_slug_problems_slug_fk",
+          "tableFrom": "review_state",
+          "tableTo": "problems",
+          "columnsFrom": [
+            "problem_slug"
+          ],
+          "columnsTo": [
+            "slug"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.schedule_blocks": {
+      "name": "schedule_blocks",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "date": {
+          "name": "date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "start_time": {
+          "name": "start_time",
+          "type": "varchar(5)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "duration_min": {
+          "name": "duration_min",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "habit_rule_id": {
+          "name": "habit_rule_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "linked_problem_slug": {
+          "name": "linked_problem_slug",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "block_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'planned'"
+        },
+        "actual_min": {
+          "name": "actual_min",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "schedule_blocks_habit_rule_id_habit_rules_id_fk": {
+          "name": "schedule_blocks_habit_rule_id_habit_rules_id_fk",
+          "tableFrom": "schedule_blocks",
+          "tableTo": "habit_rules",
+          "columnsFrom": [
+            "habit_rule_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "schedule_blocks_linked_problem_slug_problems_slug_fk": {
+          "name": "schedule_blocks_linked_problem_slug_problems_slug_fk",
+          "tableFrom": "schedule_blocks",
+          "tableTo": "problems",
+          "columnsFrom": [
+            "linked_problem_slug"
+          ],
+          "columnsTo": [
+            "slug"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tags": {
+      "name": "tags",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "tags_name_unique": {
+          "name": "tags_name_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "name"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.walkthroughs": {
+      "name": "walkthroughs",
+      "schema": "",
+      "columns": {
+        "problem_slug": {
+          "name": "problem_slug",
+          "type": "varchar(128)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "pattern": {
+          "name": "pattern",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "approach": {
+          "name": "approach",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "complexity": {
+          "name": "complexity",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pitfalls": {
+          "name": "pitfalls",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "walkthroughs_problem_slug_problems_slug_fk": {
+          "name": "walkthroughs_problem_slug_problems_slug_fk",
+          "tableFrom": "walkthroughs",
+          "tableTo": "problems",
+          "columnsFrom": [
+            "problem_slug"
+          ],
+          "columnsTo": [
+            "slug"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.attempt_outcome": {
+      "name": "attempt_outcome",
+      "schema": "public",
+      "values": [
+        "solved",
+        "solved_with_help",
+        "unsolved"
+      ]
+    },
+    "public.block_status": {
+      "name": "block_status",
+      "schema": "public",
+      "values": [
+        "planned",
+        "done",
+        "skipped",
+        "partial"
+      ]
+    },
+    "public.cert_status": {
+      "name": "cert_status",
+      "schema": "public",
+      "values": [
+        "planned",
+        "in_progress",
+        "completed"
+      ]
+    },
+    "public.difficulty": {
+      "name": "difficulty",
+      "schema": "public",
+      "values": [
+        "easy",
+        "medium",
+        "hard"
+      ]
+    },
+    "public.problem_status_kind": {
+      "name": "problem_status_kind",
+      "schema": "public",
+      "values": [
+        "not_started",
+        "attempted",
+        "solved",
+        "needs_review"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
