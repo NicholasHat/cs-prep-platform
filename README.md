@@ -52,7 +52,7 @@ Import the repo in Vercel, add the same env vars, deploy. Run `db:push` +
 - ✅ **Phase 0 — Foundation**: scaffold, DB schema, auth (Google + allowlist), app shell
 - ✅ **Phase 1 — NeetCode tracker**: 150-problem catalog, statuses, attempts + timer, walkthroughs
 - ✅ **Phase 2 — Spaced review + dashboard**: SM-2-lite queue, streaks, activity heatmap
-- ⏳ **Phase 3 — Schedule + calendar**: habit rules, planned-vs-actual, month history
-- ⏳ **Phase 4 — Visualizer**: trace-precompute engine, per-data-structure renderers
-- ⏳ **Phase 5 — Notes + AI**: notes CRUD/tags + streaming assistant (`/api/ai` route is already live)
-- ⏳ **Phase 6 — Certs + rewards + polish**
+- ✅ **Phase 3 — Schedule + calendar**: habit rules, planned-vs-actual, month history
+- ✅ **Phase 4 — Visualizer**: trace-precompute engine, 12 algorithms across array/grid/stack renderers
+- ✅ **Phase 5 — Notes + AI**: notes CRUD/search/tags + streaming Claude Haiku assistant
+- ✅ **Phase 6 — Certs + rewards**: certificate tracking, solve/category-completion celebrations
