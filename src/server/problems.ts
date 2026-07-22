@@ -82,14 +82,30 @@ export async function setProblemStatus(slug: string, statusInput: string) {
 
   // Solved / needs-review problems join the spaced-review queue, due today,
   // so the first recall rating schedules them out.
+  let categoryCompleted = false;
   if (status === "solved" || status === "needs_review") {
     await ensureReviewEnrollment(slug);
+    categoryCompleted = await isCategoryComplete(slug);
   }
 
   revalidatePath("/problems");
   revalidatePath(`/problems/${slug}`);
   revalidatePath("/review");
   revalidatePath("/");
+
+  return { categoryCompleted };
+}
+
+/** True when every problem in this problem's category is solved. */
+async function isCategoryComplete(slug: string): Promise<boolean> {
+  const result = await db.execute(sql`
+    select count(*)::int as remaining
+    from problems p
+    left join problem_status ps on ps.problem_slug = p.slug
+    where p.category = (select category from problems where slug = ${slug})
+      and (ps.status is null or ps.status not in ('solved', 'needs_review'))
+  `);
+  return (result.rows[0]?.remaining as number) === 0;
 }
 
 const attemptSchema = z.object({

@@ -2,7 +2,7 @@
 
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { celebrate } from "@/components/rewards/celebrate";
+import { celebrate, celebrateBig } from "@/components/rewards/celebrate";
 import {
   Select,
   SelectContent,
@@ -35,8 +35,13 @@ export function StatusSelect({
       onValueChange={(value) =>
         startTransition(async () => {
           try {
-            await setProblemStatus(slug, value);
-            if (value === "solved") celebrate();
+            const { categoryCompleted } = await setProblemStatus(slug, value);
+            if (categoryCompleted) {
+              celebrateBig();
+              toast.success("Category complete! 🎉");
+            } else if (value === "solved") {
+              celebrate();
+            }
           } catch {
             toast.error("Failed to update status");
           }
