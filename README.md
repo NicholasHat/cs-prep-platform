@@ -1,55 +1,64 @@
 # CS Prep Platform
 
-Personal web app for end-to-end DSA interview prep: NeetCode 150 tracking with
-spaced review, algorithm visualizations, study schedule with planned-vs-actual
-history, notes with an AI assistant, and certificate tracking.
+Personal, local-first web app for end-to-end DSA interview prep: NeetCode 150
+tracking with spaced review, algorithm visualizations, study schedule with
+planned-vs-actual history, notes with an AI assistant, and certificate
+tracking.
 
 **Stack:** Next.js (App Router) · TypeScript · Tailwind v4 + shadcn/ui ·
-Neon Postgres + Drizzle · Auth.js (Google OAuth, email allowlist) ·
-Anthropic Claude Haiku (notes assistant) · Vercel.
+Postgres (Docker) + Drizzle · Anthropic Claude Haiku (notes assistant).
 
-Full design rationale: see the approved implementation plan
-(`~/.claude/plans/prompt-for-claude-wild-newt.md`).
+Runs entirely on your machine — no accounts, no deploys, no auth. The only
+external service is the Anthropic API for the notes assistant.
 
-## Setup
+## Setup (once)
 
-1. **Environment** — copy `.env.example` to `.env` and fill in:
-   - `DATABASE_URL` — a [Neon](https://neon.tech) Postgres connection string
-   - `AUTH_SECRET` — `npx auth secret`
-   - `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` — Google OAuth client
-     (redirect URI: `<origin>/api/auth/callback/google`)
-   - `ALLOWED_EMAILS` — comma-separated emails allowed to sign in
-   - `ANTHROPIC_API_KEY` — server-side only; never shipped to the client
-
-2. **Database**
+1. Install [Docker Desktop](https://docker.com) if you don't have it.
+2. Copy the env file and add your Anthropic key
+   ([console.anthropic.com](https://console.anthropic.com)):
    ```bash
-   npm run db:push    # apply the schema to Neon
-   npm run db:seed    # load the NeetCode 150 (idempotent, safe to re-run)
+   cp .env.example .env
+   # edit .env → set ANTHROPIC_API_KEY
+   ```
+3. Start the database, create the tables, load the NeetCode 150:
+   ```bash
+   docker compose up -d
+   npm install
+   npm run db:push
+   npm run db:seed
    ```
 
-3. **Run**
-   ```bash
-   npm run dev
-   ```
+## Run
+
+```bash
+npm run dev        # → http://localhost:3000
+```
+
+The database keeps running in Docker between sessions (`docker compose stop`
+to pause it, `docker compose up -d` to resume).
 
 ## Scripts
 
 | Script | What it does |
 |---|---|
 | `npm run dev` / `build` / `start` | Next.js dev / production build / serve |
-| `npm test` | Vitest unit tests (spaced-repetition engine, etc.) |
+| `npm test` | Vitest unit tests (SRS engine, schedule merge, visualizer traces) |
+| `npm run db:push` | Apply the schema to Postgres |
+| `npm run db:seed` | Upsert the NeetCode 150 catalog (idempotent) |
+| `npm run db:backup` | Dump the database to stdout — `npm run -s db:backup > backup.sql` |
 | `npm run db:generate` | Generate SQL migrations from `src/db/schema.ts` |
-| `npm run db:push` | Push schema to the database |
-| `npm run db:seed` | Upsert the NeetCode 150 catalog |
 
-## Deploy (Vercel)
+## Hosting it later (optional)
 
-Import the repo in Vercel, add the same env vars, deploy. Run `db:push` +
-`db:seed` once against the production `DATABASE_URL`.
+The app was designed hosted-first and scaled back on purpose; going back is
+additive: restore the Auth.js + proxy files from git history
+(`git log --all --oneline -- src/auth.ts`), point `DATABASE_URL` at a hosted
+Postgres (e.g. Neon), and deploy to Vercel. The schema and queries are plain
+Postgres throughout — no rewrite needed.
 
 ## Build phases
 
-- ✅ **Phase 0 — Foundation**: scaffold, DB schema, auth (Google + allowlist), app shell
+- ✅ **Phase 0 — Foundation**: scaffold, DB schema, app shell
 - ✅ **Phase 1 — NeetCode tracker**: 150-problem catalog, statuses, attempts + timer, walkthroughs
 - ✅ **Phase 2 — Spaced review + dashboard**: SM-2-lite queue, streaks, activity heatmap
 - ✅ **Phase 3 — Schedule + calendar**: habit rules, planned-vs-actual, month history
