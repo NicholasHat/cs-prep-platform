@@ -1,11 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { auth } from "@/auth";
 import { SYSTEM_PROMPTS } from "@/lib/ai/prompts";
-
-// The Anthropic key exists only server-side (Vercel env var); this route is
-// the sole place the SDK is instantiated.
-const client = new Anthropic();
 
 const requestSchema = z.object({
   action: z.enum(["summarize", "quiz", "clarify"]),
@@ -14,12 +9,15 @@ const requestSchema = z.object({
 });
 
 export async function POST(req: Request) {
-  // Defense in depth: the proxy already gates this route, but a misconfigured
-  // matcher must never expose a paid endpoint.
-  const session = await auth();
-  if (!session?.user) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  // The Anthropic key exists only server-side; this route is the sole place
+  // the SDK is instantiated. The app runs on localhost, so no auth gate.
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return Response.json(
+      { error: "ANTHROPIC_API_KEY is not set — add it to .env" },
+      { status: 503 },
+    );
   }
+  const client = new Anthropic();
 
   const parsed = requestSchema.safeParse(await req.json());
   if (!parsed.success) {
