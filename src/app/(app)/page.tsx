@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Flame, ListChecks, RefreshCw } from "lucide-react";
+import { Briefcase, Flame, ListChecks, RefreshCw } from "lucide-react";
 import { ActivityHeatmap } from "@/components/dashboard/activity-heatmap";
 import {
   Card,
@@ -8,6 +8,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { getApplications, getDueSoon } from "@/server/applications";
 import { getDueProblems } from "@/server/review";
 import { getActivity, getCategoryProgress } from "@/server/stats";
 
@@ -15,11 +16,17 @@ export const metadata = { title: "Dashboard" };
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const [categories, activity, due] = await Promise.all([
+  const [categories, activity, due, apps, dueSoon] = await Promise.all([
     getCategoryProgress(),
     getActivity(),
     getDueProblems(),
+    getApplications(),
+    getDueSoon(),
   ]);
+
+  const liveApps = apps.filter(
+    (a) => !["rejected", "withdrawn", "ghosted"].includes(a.status),
+  );
 
   const total = categories.reduce((s, c) => s + c.total, 0);
   const solved = categories.reduce((s, c) => s + c.solved, 0);
@@ -28,7 +35,7 @@ export default async function DashboardPage() {
     <div className="mx-auto max-w-5xl space-y-6">
       <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Progress</CardTitle>
@@ -76,6 +83,27 @@ export default async function DashboardPage() {
                 {due.length === 0
                   ? "All caught up."
                   : "Head to Review to knock these out."}
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link href="/applications">
+          <Card className="h-full transition-colors hover:bg-muted/50">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Applications
+              </CardTitle>
+              <Briefcase className="size-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-semibold">{liveApps.length}</div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {apps.length === 0
+                  ? "Sync the listing feeds to get started."
+                  : dueSoon.length > 0
+                    ? `${dueSoon.length} need${dueSoon.length === 1 ? "s" : ""} attention`
+                    : "Nothing overdue."}
               </p>
             </CardContent>
           </Card>

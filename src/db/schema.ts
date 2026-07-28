@@ -46,6 +46,26 @@ export const certStatusEnum = pgEnum("cert_status", [
   "completed",
 ]);
 
+/** The internship funnel, ordered from first contact to terminal state. */
+export const applicationStatusEnum = pgEnum("application_status", [
+  "saved",
+  "applied",
+  "online_assessment",
+  "phone_screen",
+  "onsite",
+  "offer",
+  "rejected",
+  "withdrawn",
+  "ghosted",
+]);
+
+export const applicationEventKindEnum = pgEnum("application_event_kind", [
+  "status_change",
+  "interview",
+  "follow_up",
+  "note",
+]);
+
 // ---------------------------------------------------------------------------
 // NeetCode 150 tracker
 // ---------------------------------------------------------------------------
@@ -253,3 +273,151 @@ export const noteTagsRelations = relations(noteTags, ({ one }) => ({
 export const tagsRelations = relations(tags, ({ many }) => ({
   noteTags: many(noteTags),
 }));
+
+// ---------------------------------------------------------------------------
+// Internship applications
+// ---------------------------------------------------------------------------
+
+/**
+ * Listings mirrored from public GitHub aggregator repos. The posting URL is
+ * the primary key: the same job often appears in several repos under different
+ * source ids, and the URL is the only stable identity across them.
+ */
+export const internshipListings = pgTable("internship_listings", {
+  url: text("url").primaryKey(),
+  sourceId: text("source_id").notNull(),
+  /** Key of the feed in FEEDS (e.g. "simplify-summer-2026"). */
+  sourceFeed: text("source_feed").notNull(),
+  company: text("company").notNull(),
+  title: text("title").notNull(),
+  companyUrl: text("company_url"),
+  locations: text("locations").array().notNull().default([]),
+  terms: text("terms").array().notNull().default([]),
+  category: text("category"),
+  sponsorship: text("sponsorship"),
+  degrees: text("degrees").array().notNull().default([]),
+  active: boolean("active").notNull().default(true),
+  datePosted: timestamp("date_posted", { withTimezone: true }),
+  dateUpdated: timestamp("date_updated", { withTimezone: true }),
+  syncedAt: timestamp("synced_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
+ * A job you are actually pursuing. Decoupled from `internship_listings` so a
+ * row survives the listing going inactive, and so postings found off-feed can
+ * be tracked by hand.
+ */
+export const applications = pgTable("applications", {
+  id: serial("id").primaryKey(),
+  listingUrl: text("listing_url").references(() => internshipListings.url, {
+    onDelete: "set null",
+  }),
+  company: text("company").notNull(),
+  role: text("role").notNull(),
+  location: text("location"),
+  jobUrl: text("job_url"),
+  status: applicationStatusEnum("status").notNull().default("saved"),
+  /** 1 = reach, 2 = target, 3 = volume. Drives sort order on the board. */
+  tier: smallint("tier").notNull().default(2),
+  appliedAt: date("applied_at"),
+  deadline: date("deadline"),
+  nextAction: text("next_action"),
+  nextActionDate: date("next_action_date"),
+  referral: text("referral"),
+  notes: text("notes"),
+  coverLetter: text("cover_letter"),
+  coverLetterUpdatedAt: timestamp("cover_letter_updated_at", {
+    withTimezone: true,
+  }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/** Append-only timeline: status transitions, scheduled interviews, follow-ups. */
+export const applicationEvents = pgTable("application_events", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id")
+    .notNull()
+    .references(() => applications.id, { onDelete: "cascade" }),
+  kind: applicationEventKindEnum("kind").notNull().default("note"),
+  detail: text("detail").notNull(),
+  at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Base cover letters you upload; the generator rewrites one per application. */
+export const coverLetterTemplates = pgTable("cover_letter_templates", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  body: text("body").notNull(),
+  isDefault: boolean("is_default").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/** Cached AI rundown of a company's interview loop, keyed by lowercased name. */
+export const companyReports = pgTable("company_reports", {
+  companyKey: text("company_key").primaryKey(),
+  company: text("company").notNull(),
+  body: text("body").notNull(),
+  model: text("model"),
+  generatedAt: timestamp("generated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
+ * Single-row (id = 1) profile. Gives the cover-letter generator the background
+ * it needs to tailor concretely instead of writing generic filler.
+ */
+export const profile = pgTable("profile", {
+  id: integer("id").primaryKey().default(1),
+  fullName: text("full_name"),
+  email: text("email"),
+  phone: text("phone"),
+  school: text("school"),
+  gradYear: text("grad_year"),
+  links: text("links"),
+  resumeText: text("resume_text"),
+  highlights: text("highlights"),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const applicationsRelations = relations(
+  applications,
+  ({ one, many }) => ({
+    listing: one(internshipListings, {
+      fields: [applications.listingUrl],
+      references: [internshipListings.url],
+    }),
+    events: many(applicationEvents),
+  }),
+);
+
+export const applicationEventsRelations = relations(
+  applicationEvents,
+  ({ one }) => ({
+    application: one(applications, {
+      fields: [applicationEvents.applicationId],
+      references: [applications.id],
+    }),
+  }),
+);
+
+export const internshipListingsRelations = relations(
+  internshipListings,
+  ({ many }) => ({
+    applications: many(applications),
+  }),
+);

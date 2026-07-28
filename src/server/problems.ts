@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import {
@@ -44,6 +44,23 @@ export async function getProblemList() {
 }
 
 export type ProblemListRow = Awaited<ReturnType<typeof getProblemList>>[number];
+
+/**
+ * Resolves handbook cross-links. Unknown slugs are dropped rather than erroring
+ * — chapter content and the seeded catalog version independently.
+ */
+export async function getProblemsBySlugs(slugs: string[]) {
+  if (slugs.length === 0) return [];
+  return db
+    .select({
+      slug: problems.slug,
+      title: problems.title,
+      difficulty: problems.difficulty,
+    })
+    .from(problems)
+    .where(inArray(problems.slug, slugs))
+    .orderBy(asc(problems.sortOrder));
+}
 
 export async function getProblemDetail(slug: string) {
   const problem = await db.query.problems.findFirst({

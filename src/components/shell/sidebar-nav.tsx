@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Award,
+  BookOpen,
+  Briefcase,
   CalendarDays,
   CalendarRange,
   LayoutDashboard,
@@ -17,6 +19,8 @@ import { cn } from "@/lib/utils";
 const items = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/problems", label: "Problems", icon: ListChecks },
+  { href: "/handbook", label: "Handbook", icon: BookOpen },
+  { href: "/applications", label: "Applications", icon: Briefcase },
   { href: "/review", label: "Review", icon: RefreshCw },
   { href: "/visualizer", label: "Visualizer", icon: Play },
   { href: "/schedule", label: "Schedule", icon: CalendarDays },
