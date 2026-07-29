@@ -43,7 +43,7 @@ Assume a 45-minute slot. Some companies give you 60, a few give you 35 — scale
 
 **Still talking at minute 20.** The mirror mistake is treating the discussion phase as the interview. You explore three approaches, you compare them elegantly, the interviewer is nodding — and there is no code on the screen. A brilliant unwritten solution scores below a working one. Interviewers are explicitly asked "did the candidate produce working code?" and "I ran out of time" is not a mark in your favor unless the problem was genuinely oversized.
 
-The fix for both is the same: treat 15:00 as a hard commit deadline. At 15:00 you say out loud, *"I want to start coding — I'll go with the hash-map approach, and I'll flag it if I hit a wall."* You can still be wrong. You just cannot still be undecided.
+The fix for both is the same: treat 15:00 as a hard commit deadline. At 15:00 you say out loud, *"I want to start coding — I'll go with the dict approach, and I'll flag it if I hit a wall."* You can still be wrong. You just cannot still be undecided.
 
 ## Recovering time
 
@@ -69,17 +69,17 @@ Before you ask, finish this sentence in your head: *"If they say yes I'll do X, 
 | "Can the values be negative? Zero?" | Kills or saves prefix-sum, two-pointer, and greedy approaches outright |
 | "Can there be duplicates?" | Changes set-vs-map, changes whether you dedupe results, changes tie-breaking |
 | "Is the input sorted, or can I sort it?" | Sorting costs O(n log n) — worth knowing if you're already paying it |
-| "Am I allowed to mutate the input?" | Decides in-place vs O(n) extra space, and whether the caller's array is safe |
-| "What do I return if there's no valid answer?" | -1, null, empty array, throw — this is a real branch in your code |
+| "Am I allowed to mutate the input?" | Decides in-place vs O(n) extra space, and whether the caller's list is safe |
+| "What do I return if there's no valid answer?" | -1, \`None\`, empty list, raise — this is a real branch in your code |
 | "Is the whole input in memory, or is it a stream?" | Streaming forbids two passes and random access |
-| "What character set — ASCII, lowercase only, full Unicode?" | Decides fixed 26-slot array vs a Map; affects your space claim |
+| "What character set — ASCII, lowercase only, full Unicode?" | Decides a fixed 26-slot list vs a \`dict\`; affects your space claim |
 | "Any memory constraint I should design against?" | Occasionally the actual point of the question |
 
 | Wasteful | Why it costs you |
 | --- | --- |
 | Anything the prompt already stated | Reads as "did not read carefully" — the single cheapest way to lose points |
-| "Should I handle null?" asked separately for five parameters | One question covers it: "Should I assume inputs are well-formed?" |
-| "Can I use built-in sort / a hash map?" | Yes. Always yes, unless the problem is obviously about implementing one |
+| "Should I handle \`None\`?" asked separately for five parameters | One question covers it: "Should I assume inputs are well-formed?" |
+| "Can I use \`sorted\` / a \`dict\`?" | Yes. Always yes, unless the problem is obviously about implementing one |
 | "What language should I use?" | Asked and answered in the scheduling email |
 | Trivia with no branch — "are the strings long?" with no threshold in mind | You have no plan for either answer |
 | Asking about a follow-up variant before solving the base problem | Reads as stalling |
@@ -88,7 +88,7 @@ Before you ask, finish this sentence in your head: *"If they say yes I'll do X, 
 
 Drip-feeding questions across ten minutes fragments the round. Read the problem, think for twenty seconds, then ask three or four in one breath:
 
-> *"A few things before I dig in: how large can \`nums\` get, can the values be negative, and what should I return if no pair sums to the target? Also, is it safe to assume the input is well-formed — no nulls?"*
+> *"A few things before I dig in: how large can \`nums\` get, can the values be negative, and what should I return if no pair sums to the target? Also, is it safe to assume the input is well-formed — no \`None\` values?"*
 
 That is one exchange, thirty seconds, and it has fully specified your target complexity, your arithmetic edge cases, your return contract, and your guard clauses.
 
@@ -96,7 +96,7 @@ That is one exchange, thirty seconds, and it has fully specified your target com
 
 This is the highest-value-per-second thing you will say all round. After the answers land:
 
-> *"Okay — so given an array of up to 10⁵ integers that may be negative and may repeat, I need to return the indices of the two that sum to \`target\`, or an empty array if there is no such pair. Is that right?"*
+> *"Okay — so given a list of up to 10⁵ integers that may be negative and may repeat, I need to return the indices of the two that sum to \`target\`, or an empty list if there is no such pair. Is that right?"*
 
 Two reasons this earns points. First, it catches misreads while they are still free — roughly one in five candidates has a subtly wrong model of the problem at minute five, and this is where it surfaces. Second, in a real job you will be handed ambiguous tickets forever, and "restates the requirement back before starting" is exactly the habit that gets scored under *problem solving* and *communication* at the same time.`,
     },
@@ -152,7 +152,7 @@ One extra move worth the ten seconds: write a *second* example that is almost th
 
 Do not improvise this. It is the same shape every time:
 
-> *"The brute force is to check every pair of indices and keep the best — that's O(n²) time, O(1) space. I think we can do better by trading space for time: one pass with a hash map of values we've already seen, which should get us O(n) time and O(n) space. Do you want me to go straight to the optimal, or would you like me to code the brute force first?"*
+> *"The brute force is to check every pair of indices and keep the best — that's O(n²) time, O(1) space. I think we can do better by trading space for time: one pass with a dict of values we've already seen, which should get us O(n) time and O(n) space. Do you want me to go straight to the optimal, or would you like me to code the brute force first?"*
 
 Four things happened in fifteen seconds: you proved comprehension, you gave complexities unprompted, you named the mechanism of the optimization (not just its name), and you handed the pacing decision to the interviewer. That last part matters — many interviewers will say "go straight to optimal," and now you have their explicit permission, which means nobody is going to ding you at debrief for skipping the baseline.
 
@@ -171,7 +171,7 @@ Reasoning is structured — it has a claim, a test, and a conclusion. Confusion 
 
 ## What to actually say
 
-**State a hypothesis, then test it aloud.** This is the core move. *"I think a single pass with a hash map works here. Let me check that against \`[3, 3]\` — first 3 goes in the map, second 3 finds it, returns [0,1]. Yeah, that holds."* The interviewer can now write "forms and validates hypotheses" in their notes.
+**State a hypothesis, then test it aloud.** This is the core move. *"I think a single pass with a dict works here. Let me check that against \`[3, 3]\` — the first 3 goes in the dict, the second 3 finds it, returns \`[0, 1]\`. Yeah, that holds."* The interviewer can now write "forms and validates hypotheses" in their notes.
 
 **Say what you're ruling out and why.** *"I considered sorting first, but I need the original indices back, so sorting costs me more than it saves. Skipping that."* Eliminated options are evidence of breadth. Unspoken eliminated options are evidence of nothing.
 
@@ -181,7 +181,7 @@ Reasoning is structured — it has a claim, a test, and a conclusion. Confusion 
 
 ## What rambling sounds like
 
-Rambling is unfiltered output: every reaction, no commitment. *"Okay so we could maybe sort it, or actually a hash map might, hmm, but then the indices, wait — or two pointers? Two pointers needs sorted though. Hmm. Maybe... let me think. A set maybe?"*
+Rambling is unfiltered output: every reaction, no commitment. *"Okay so we could maybe sort it, or actually a dict might, hmm, but then the indices, wait — or two pointers? Two pointers needs sorted though. Hmm. Maybe... let me think. A set maybe?"*
 
 Two things are being inferred from that, and neither is good. First, **low confidence** — nothing was asserted, so nothing can be credited. Second, **no filter** — in a real design review, this person will not be able to compress their thinking into a recommendation, and their teammates will have to do it for them. Senior interviewers care about this a lot more than juniors expect.
 
@@ -189,11 +189,11 @@ Two things are being inferred from that, and neither is good. First, **low confi
 
 **Rambled:**
 
-> *"Okay so brute force is like two loops I guess, that's n squared, which is probably too slow? Or maybe it's fine, I don't know how big n is. Hmm, we could sort — no wait, we need indices. A hash map maybe? But what do I put in it, the value? Or the index? I think the value... or maybe both. Let me think. Hmm."*
+> *"Okay so brute force is like two loops I guess, that's n squared, which is probably too slow? Or maybe it's fine, I don't know how big n is. Hmm, we could sort — no wait, we need indices. A dict maybe? But what do I put in it, the value? Or the index? I think the value... or maybe both. Let me think. Hmm."*
 
 **Structured:**
 
-> *"Brute force is nested loops, O(n²). With n up to 10⁵ that's 10¹⁰ operations, so it's too slow — we need better than quadratic. Sorting would let me use two pointers, but I need the original indices, so that costs me a re-map. Instead I'll trade space for time: one pass, hash map from value to index, and at each element I look up \`target - nums[i]\`. That's O(n) time, O(n) space. Let me sanity-check it on \`[3, 3]\` with target 6 — yes, that works. I'll go with that."*
+> *"Brute force is nested loops, O(n²). With n up to 10⁵ that's 10¹⁰ operations, so it's too slow — we need better than quadratic. Sorting would let me use two pointers, but I need the original indices, so that costs me a re-map. Instead I'll trade space for time: one pass, a dict from value to index, and at each element I look up \`target - value\`. That's O(n) time, O(n) space. Let me sanity-check it on \`[3, 3]\` with target 6 — yes, that works. I'll go with that."*
 
 Same brain, same twenty seconds of thought, same conclusion. The second version contains four scorable statements: a complexity estimate tied to the actual constraint, a rejected alternative with a reason, a named mechanism, and a validated example. The first contains zero.
 
@@ -250,29 +250,28 @@ It converts a 15-minute risk into a 15-second one. If your approach is wrong, yo
 
 Single letters cost you for free. \`a\`, \`b\`, \`tmp\`, \`res2\`, \`x\` force the interviewer to hold a mental symbol table while also evaluating your logic, and people who are spending attention on that are not enjoying reading your code.
 
-Exceptions that are fine: \`i\`, \`j\` for plain indices, \`n\` for input size, \`node\` in a traversal, and problem-native symbols (\`k\` when the problem says "k").
+Exceptions that are fine: \`i\`, \`j\` for plain indices, \`n\` for input size, \`node\` in a traversal, \`_\` for a genuinely unused loop variable, and problem-native symbols (\`k\` when the problem says "k").
 
 | Instead of | Use |
 | --- | --- |
 | \`l\`, \`r\` | \`left\`, \`right\` |
-| \`s\`, \`e\` | \`windowStart\`, \`windowEnd\` |
-| \`m\`, \`map\`, \`d\` | \`seen\`, \`freq\`, \`lastIndex\`, \`indexOf\` |
+| \`s\`, \`e\` | \`window_start\`, \`window_end\` |
+| \`m\`, \`d\`, \`dct\` | \`seen\`, \`freq\`, \`last_index\`, \`index_of\` |
 | \`res\`, \`ans\`, \`out\` | \`best\`, \`longest\`, \`matches\`, \`result\` (\`result\` is fine) |
-| \`tmp\` | \`carry\`, \`previous\`, \`swapBuffer\` — or delete the variable |
-| \`f\`, \`helper\` | \`isValid\`, \`neighborsOf\`, \`expandAround\` |
+| \`tmp\` | \`carry\`, \`previous\`, \`swap_buffer\` — or delete the variable |
+| \`f\`, \`helper\` | \`is_valid\`, \`neighbors_of\`, \`expand_around\` |
 
-A good name is documentation you do not have to write and the interviewer does not have to decode.
+Use \`snake_case\` for functions and variables, and do not shadow a builtin — naming a variable \`list\`, \`dict\`, \`sum\`, \`max\`, \`id\`, or \`input\` works right up until you need the builtin two lines later. A good name is documentation you do not have to write and the interviewer does not have to decode.
 
 ## Signature and return first
 
-Write the function signature and the return statement before the body. Three seconds, and it forces you to decide the contract — what type comes back, what "no answer" looks like — before you are deep in loop logic. It also means that if you run out of time, the shape of your solution is on the screen.
+Write the function signature and the return statement before the body. Three seconds, and it forces you to decide the contract — what type comes back, what "no answer" looks like — before you are deep in loop logic. Type hints are the cheapest way to put that contract on the screen. It also means that if you run out of time, the shape of your solution is visible.
 
-\`\`\`ts
-function lengthOfLongestSubstring(s: string): number {
-  let best = 0;
-  // ... window logic goes here
-  return best;
-}
+\`\`\`python
+def length_of_longest_substring(s: str) -> int:
+    best = 0
+    # ... window logic goes here
+    return best
 \`\`\`
 
 ## Extract a helper instead of nesting four levels
@@ -283,61 +282,60 @@ If you are at four levels of indentation, the interviewer has lost the thread. P
 
 A wall of six guard clauses at the top before you have written the algorithm is defensive noise, and half of them will turn out to be unnecessary once the loop exists. Write the main path, then handle edges at the point where they actually arise. Usually you will find the loop already handles the empty case, because it just doesn't execute — and being able to say *"empty input falls out naturally here, the loop body never runs and we return 0"* is stronger than a guard clause that proves you didn't check.
 
-Genuine preconditions (null input, invalid \`k\`) do belong at the top. The test is whether the guard prevents a crash or merely restates the loop's behavior.
+Genuine preconditions (\`None\` input, invalid \`k\`) do belong at the top. The test is whether the guard prevents a crash or merely restates the loop's behavior.
 
 ## The off-by-one discipline
 
 Off-by-one errors are the single most common bug in live coding, and they are almost entirely preventable by making one decision explicitly instead of implicitly. When you write a loop or an interval, **say the convention out loud and then obey it**:
 
-> *"My window is inclusive on both ends — \`[windowStart, right]\` — so the length is \`right - windowStart + 1\`. And I'm looping \`right\` from 0 to \`s.length - 1\`."*
+> *"My window is inclusive on both ends — \`[window_start, right]\` — so the length is \`right - window_start + 1\`. And \`right\` runs over \`enumerate(s)\`, so it goes from 0 to \`len(s) - 1\`."*
 
 Now every length computation and every boundary check in the rest of the function has a rule to be checked against, including by the interviewer. The candidates who get bitten are the ones who use half-open intervals in one place and inclusive in another because they never decided.
 
-Corollary: when you compare adjacent elements, you loop to \`n - 1\`, and you should say why — *"I stop at \`n - 1\` because I read \`i + 1\` inside the loop."* Interviewers watch for exactly this line and it takes two seconds.
+Python helps here if you let it. \`enumerate(s)\` gives you the index and the element together, so there is no \`range(len(s))\` plus \`s[i]\` to keep in sync, and a slice \`s[window_start:right + 1]\` is half-open by definition — which is worth saying out loud precisely because it is the *opposite* convention from an inclusive window, and mixing the two is the classic off-by-one.
+
+Corollary: when you compare adjacent elements, you loop to \`n - 1\` — \`for i in range(n - 1)\` — and you should say why: *"I stop at \`n - 1\` because I read \`nums[i + 1]\` inside the loop."* Interviewers watch for exactly this line and it takes two seconds. (Better still, \`zip(nums, nums[1:])\` removes the bound entirely, and saying that is worth a point on its own.)
 
 ## Comments should be rare and load-bearing
 
-A comment that restates the code (\`// increment i\`) is worse than nothing. A comment that explains a non-obvious *why* is worth writing: what a map's keys and values mean, why a bound is what it is, what invariant a loop maintains. One or two per solution.
+A comment that restates the code (\`# increment i\`) is worse than nothing. A comment that explains a non-obvious *why* is worth writing: what a dict's keys and values mean, why a bound is what it is, what invariant a loop maintains. One or two per solution. A type hint on the dict — \`last_seen: dict[str, int]\` — often replaces the comment entirely.
 
 ## Do not golf
 
-Chained ternaries, clever bit tricks, one-liners with three operations in them — these read as showing off and they make bugs invisible, including to you. Consistency beats cleverness: if you used \`for...of\` above, use \`for...of\` below.
+Nested conditional expressions, a comprehension with two \`for\` clauses and a filter crammed onto one line, clever \`functools.reduce\` chains, walrus operators used to save a line — these read as showing off and they make bugs invisible, including to you. Consistency beats cleverness: if you used \`enumerate\` above, use \`enumerate\` below.
 
 ## Before and after
 
 Same algorithm, both correct:
 
-\`\`\`ts
-// Sloppy — correct, and unpleasant to review.
-function f(a: number[], b: number): number[] {
-  let m = new Map<number, number>();
-  for (let i = 0; i < a.length; i++) {
-    let t = b - a[i];
-    if (m.has(t)) { return [m.get(t)!, i]; }
-    m.set(a[i], i);
-  }
-  return [];
-}
+\`\`\`python
+# Sloppy — correct, and unpleasant to review.
+def f(a, b):
+    m = {}
+    for i in range(len(a)):
+        t = b - a[i]
+        if t in m:
+            return [m[t], i]
+        m[a[i]] = i
+    return []
 \`\`\`
 
-\`\`\`ts
-// Clean — same complexity, obviously correct on a first read.
-function twoSum(nums: number[], target: number): number[] {
-  // Value -> index of an earlier element with that value.
-  const seen = new Map<number, number>();
+\`\`\`python
+# Clean — same complexity, obviously correct on a first read.
+def two_sum(nums: list[int], target: int) -> list[int]:
+    # Value -> index of an earlier element with that value.
+    seen: dict[int, int] = {}
 
-  for (let i = 0; i < nums.length; i++) {
-    const complement = target - nums[i];
-    const matchIndex = seen.get(complement);
-    if (matchIndex !== undefined) return [matchIndex, i];
-    seen.set(nums[i], i);
-  }
+    for index, value in enumerate(nums):
+        complement = target - value
+        if complement in seen:
+            return [seen[complement], index]
+        seen[value] = index
 
-  return [];
-}
+    return []
 \`\`\`
 
-What changed and why it is scored: the function and parameters say what they are; \`const\` where nothing is reassigned, so the reader knows what moves; the map's contents are documented in one line; \`seen.get\` is called once and stored instead of \`has\` + \`get\` + a non-null assertion (the \`!\` was hiding a type hole); and the "no answer" return is visible at the bottom instead of implied. None of this took extra time. All of it is the difference between "works" and "hire."`,
+What changed and why it is scored: the function and parameters say what they are; the type hints put the contract — a list of ints in, a list of ints out — on the screen without a sentence of explanation; \`enumerate\` replaces \`range(len(...))\` plus manual subscripting, so the index and the value cannot drift apart; \`seen: dict[int, int]\` plus one comment documents what the keys and values *mean*, which the type alone does not; the input list is never mutated, so the caller's data is safe and you can say so; and the "no answer" \`return []\` is visible at the bottom instead of falling off the end of the function as an implicit \`None\`. That last one is a real Python hazard worth naming out loud — a function that returns \`list[int]\` on one path and \`None\` on another is a bug waiting for the caller. None of this took extra time. All of it is the difference between "works" and "hire."`,
     },
     {
       id: "testing-your-own-code",
@@ -348,7 +346,7 @@ What changed and why it is scored: the function and parameters say what they are
 
 Put your cursor on line one and walk down it with an actual input, saying the state of every variable as it changes. Not "then we loop through and update the max" — that is describing your intent, and your intent is not the bug. The bug is in the gap between your intent and the characters on the screen, and only literal execution finds it.
 
-The audible version sounds like: *"windowStart is 0, best is 0. right is 0, character is 'a', not in the map, so we set lastSeen a to 0, best becomes max of 0 and 1, so 1. right is 1, character 'b'..."*
+The audible version sounds like: *"\`window_start\` is 0, \`best\` is 0. First iteration of \`enumerate\`: \`right\` is 0, \`ch\` is 'a', \`'a' not in last_seen\`, so we set \`last_seen['a'] = 0\`, \`best\` becomes max of 0 and 1, so 1. Next: \`right\` is 1, \`ch\` is 'b'..."*
 
 Yes, it feels slow. It takes ninety seconds and it is the highest-yield ninety seconds in the round.
 
@@ -356,9 +354,9 @@ Yes, it feels slow. It takes ninety seconds and it is the highest-yield ninety s
 
 For anything with more than two moving variables, write the table. It is faster to produce, far easier to scan, and the interviewer can follow along and catch things with you.
 
-Tracing \`maxProfit([7, 1, 5, 3, 6, 4])\`:
+Tracing \`max_profit([7, 1, 5, 3, 6, 4])\`:
 
-| i | price | minSoFar (before) | price − minSoFar | best (after) |
+| i | price | min_so_far (before) | price − min_so_far | best (after) |
 | --- | --- | --- | --- | --- |
 | 0 | 7 | ∞ | — | 0 |
 | 1 | 1 | 7 | −6 | 0 |
@@ -374,19 +372,19 @@ Returns 5. Expected 5. Done — and the table is now a durable artifact both of 
 You have five to seven minutes. Spend it on four inputs, in this order:
 
 1. **Your worked example from minute six.** You already know the answer, so this is verification rather than a fresh derivation.
-2. **Empty or single-element input.** Usually five seconds: *"empty string — \`s.length\` is 0, the loop never runs, we return \`best\` which is 0. Correct."* This is where guard-clause bugs and \`arr[0]\` accesses die.
+2. **Empty or single-element input.** Usually five seconds: *"empty string — \`enumerate("")\` yields nothing, the loop body never runs, we return \`best\` which is 0. Correct."* This is where guard-clause bugs and \`nums[0]\` accesses on an empty list die.
 3. **A duplicate / tie / all-same case.** \`"abba"\`, \`[2, 2, 2]\`, two paths of equal length. This is where the subtle bugs live, because duplicates are where "have I seen this?" and "is it still relevant?" stop being the same question.
 4. **The branch you trust least.** You know which one it is — the condition you wrote twice, the \`>=\` you had to think about. Construct an input that reaches it and run it.
 
 ## Find your own bug before they point at it
 
-This matters more than avoiding the bug. Two candidates ship the same off-by-one. Candidate A traces, spots it, says *"I have a bug — my window never shrinks when the repeat is outside the current window, so \`\"abba\"\` returns 3 instead of 2. I need to check whether the last-seen index is still inside the window,"* and fixes it in one line. Candidate B says "looks good," and the interviewer says "try \`abba\`."
+This matters more than avoiding the bug. Two candidates ship the same off-by-one. Candidate A traces, spots it, says *"I have a bug — my window start moves backwards when the repeat is outside the current window, so \`\"abba\"\` returns 3 instead of 2. I need to check whether the last-seen index is still inside the window,"* and fixes it in one line. Candidate B says "looks good," and the interviewer says "try \`abba\`."
 
 Candidate A demonstrated self-verification — the exact behavior that makes someone trustworthy without supervision, which is the whole question being answered about an intern. Candidate B demonstrated that their code is correct only when someone is watching. A scores higher, and it is not close.
 
 So say it plainly when you find one. No apologizing, no "oh god, sorry." State the symptom, state the cause, state the fix:
 
-> *"There's a bug here. On \`\"abba\"\`, when I reach the second \`a\`, its last-seen index is 0, which is behind my window start, so I move \`windowStart\` backwards to 1 and the window becomes invalid. The fix is to only jump forward — take the max of the current start and \`lastIndex + 1\`."*
+> *"There's a bug here. On \`\"abba\"\`, when I reach the second \`a\`, its last-seen index is 0, which is behind my window start, so I move \`window_start\` backwards to 1 and the window becomes invalid. The fix is to only jump forward — \`window_start = max(window_start, last_seen[ch] + 1)\`, or the equivalent guard."*
 
 That sentence, delivered calmly, is worth more than a clean first draft.`,
     },
@@ -404,7 +402,7 @@ That sentence, delivered calmly, is worth more than a clean first draft.`,
 
 ## What actually kills you
 
-**Arguing with it.** Interviewers give hints because they know the answer. If a hint contradicts your plan, your plan is wrong roughly nine times out of ten. Pushing back reads as un-coachable, which is disqualifying at intern level regardless of how well you code. If you genuinely think the hint doesn't apply, the acceptable phrasing is a question, not a rebuttal: *"I want to make sure I'm following — with the map approach, wouldn't I still need to handle the case where the duplicate is outside the window? Or does that fall out?"* You may still be wrong, but you asked instead of asserted.
+**Arguing with it.** Interviewers give hints because they know the answer. If a hint contradicts your plan, your plan is wrong roughly nine times out of ten. Pushing back reads as un-coachable, which is disqualifying at intern level regardless of how well you code. If you genuinely think the hint doesn't apply, the acceptable phrasing is a question, not a rebuttal: *"I want to make sure I'm following — with the dict approach, wouldn't I still need to handle the case where the duplicate is outside the window? Or does that fall out?"* You may still be wrong, but you asked instead of asserted.
 
 **Ignoring it and continuing.** The classic version: interviewer says "what if you sorted first?", candidate says "yeah, maybe" and keeps typing the unsorted approach. The interviewer now has to escalate, the clock burns, and their note says "did not respond to guidance."
 
@@ -419,8 +417,8 @@ Hints come in levels, and each level tells you where you stand. Knowing the ladd
 | 0 — Prompt | "What's the complexity of that?" / "Walk me through the example again." | Neutral. Standard interviewer behavior. Costs nothing |
 | 1 — Nudge | "Is there work you're repeating across iterations?" | Essentially free. Nearly everyone gets one. Take it and go |
 | 2 — Direction | "What if you kept track of what you've already seen?" | Minor. Still comfortably in hire range if you run with it well |
-| 3 — Structure | "Try a hash map from character to index." | Real cost. The core insight was handed to you, so you are now being scored on execution — write it cleanly and test it thoroughly |
-| 4 — Implementation | "You'll want \`windowStart = Math.max(windowStart, lastIndex + 1)\`." | Significant. Recoverable only by flawless execution plus strong performance on the follow-up |
+| 3 — Structure | "Try a dict from character to index." | Real cost. The core insight was handed to you, so you are now being scored on execution — write it cleanly and test it thoroughly |
+| 4 — Implementation | "You'll want \`window_start = max(window_start, last_seen[ch] + 1)\`." | Significant. Recoverable only by flawless execution plus strong performance on the follow-up |
 | 5 — Rescue | Walking you through the whole algorithm | Usually below bar for this round. Salvage what you can; loops are multi-round and other interviewers may not have seen this |
 
 The practical takeaway: **a level-1 or level-2 hint on a medium, handled well, is a normal hire.** Do not tank your composure over it. But if you are receiving level-3 hints on the second problem in a row, the diagnosis is preparation, not nerves.`,
@@ -441,7 +439,7 @@ Being stuck is not a penalty. Being *silently* stuck for four minutes is a large
 1. **Restate the problem.** Out loud, in one sentence, from scratch. A surprising number of stuck moments are actually a corrupted problem model from ten minutes ago.
 2. **Go back to the concrete example.** Abstract thought is what jammed. Take \`"abcabcbb"\` and solve it by hand, by whatever method a human would use. Then ask what your hand was doing.
 3. **Solve a smaller or simpler version.** What if the array were sorted? What if there were no duplicates? What if k were always 1? Solve that, then ask what breaks when you relax the assumption. The relaxation is often the whole algorithm.
-4. **Enumerate data structures and ask what each buys you.** Literally walk the list: array, hash map, hash set, stack, queue, heap, sorted array, two pointers, tree, graph. For each: *what does this give me in O(1) that I currently pay O(n) for?* This is mechanical, it works when you are blank, and it can be said out loud as reasoning rather than flailing.
+4. **Enumerate data structures and ask what each buys you.** Literally walk the list: \`list\`, \`dict\`, \`set\`, a stack (a plain list), \`collections.deque\`, a heap via \`heapq\`, a sorted list plus \`bisect\`, two pointers, tree, graph. For each: *what does this give me in O(1) that I currently pay O(n) for?* This is mechanical, it works when you are blank, and it can be said out loud as reasoning rather than flailing.
 5. **Look for the invariant.** What is true at every step of a correct solution? "The window always contains distinct characters." "The stack is always increasing." Naming the invariant frequently produces the algorithm, because the algorithm is just "restore the invariant when it breaks."
 6. **Ask for a nudge.** If two minutes have passed with no movement, ask. *"I've been going in circles on how to shrink the window efficiently. Could I get a nudge?"* This costs you a level-2 hint. Silence costs you more than that, and it costs the clock too.
 
@@ -478,13 +476,13 @@ Do not debug against \`"abcabcbb"\` if \`"abba"\` also fails. Shrink the input u
 
 This is the rule that separates the two kinds of candidates. Before your hands touch the keyboard:
 
-> *"My hypothesis is that \`windowStart\` is moving backwards when the duplicate is outside the current window. If that's true, then on \`\"abba\"\` at index 3, \`windowStart\` should be 1 when it ought to be 2. Let me check that specific value."*
+> *"My hypothesis is that \`window_start\` is moving backwards when the duplicate is outside the current window. If that's true, then on \`\"abba\"\` at index 3, \`window_start\` should be 1 when it ought to be 2. Let me check that specific value."*
 
 Now the trace has a yes/no question to answer, which takes fifteen seconds. Confirmed, you fix the actual cause. Refuted, you have eliminated a possibility and learned something — also progress.
 
 ## Do not shotgun-edit
 
-The anti-pattern, and it is extremely visible from the other side of the screen: change \`<\` to \`<=\`, re-run mentally, doesn't work, change it back, add a \`+ 1\`, move a line, swap two conditions. Random perturbation until the symptom disappears is not debugging. Even when it lands, you cannot explain why your code is correct, so the interviewer cannot credit correctness — and worse, they have now seen how you handle a failing test.
+The anti-pattern, and it is extremely visible from the other side of the screen: change \`<\` to \`<=\`, re-run mentally, doesn't work, change it back, add a \`+ 1\`, dedent a line, swap two conditions. Random perturbation until the symptom disappears is not debugging. Even when it lands, you cannot explain why your code is correct, so the interviewer cannot credit correctness — and worse, they have now seen how you handle a failing test.
 
 If you catch yourself doing it: stop, hands off, say *"let me stop guessing and trace this properly."* Reclaiming the method out loud after slipping is itself decent signal.
 
@@ -494,19 +492,17 @@ When you cannot see the bug by reading, bisect the pipeline. Pick a point halfwa
 
 In a live round the "print statement" is you saying values aloud, or writing them beside the code:
 
-\`\`\`ts
-for (let right = 0; right < s.length; right++) {
-  const ch = s[right];
-  const prev = lastSeen.get(ch);
-  if (prev !== undefined) windowStart = prev + 1;
-  lastSeen.set(ch, right);
-  // Checkpoint: for s = "abba", is [windowStart, right] always distinct?
-  // right=3 -> windowStart=1, window "bba" -> NOT distinct. Bug is above this line.
-  best = Math.max(best, right - windowStart + 1);
-}
+\`\`\`python
+for right, ch in enumerate(s):
+    if ch in last_seen:
+        window_start = last_seen[ch] + 1
+    last_seen[ch] = right
+    # Checkpoint: for s = "abba", is s[window_start:right + 1] always distinct?
+    # right=3 -> window_start=1, window "bba" -> NOT distinct. Bug is above this line.
+    best = max(best, right - window_start + 1)
 \`\`\`
 
-The invariant check at the midpoint localized it in one step: the window is already invalid before \`best\` is computed, so \`best\` is not the problem — the \`windowStart\` update is.
+The invariant check at the midpoint localized it in one step: the window is already invalid before \`best\` is computed, so \`best\` is not the problem — the \`window_start\` update is.
 
 ## Narrate the hypothesis, not the anxiety
 
@@ -525,7 +521,7 @@ Interviewers watch what happens to you when your code is visibly wrong, because 
 
 "It's O(n)" is a memorized label. Interviewers can't tell whether you understand it. Derive it in one sentence by pointing at the code:
 
-> *"Each character enters the window once and leaves at most once, so the total pointer movement is bounded by 2n — that's O(n) time. The map holds at most one entry per distinct character, so space is O(min(n, k)) where k is the alphabet size; for ASCII that's O(1) in practice, but I'd state it as O(n) if the alphabet is unbounded."*
+> *"Each character enters the window once and leaves at most once, so the total pointer movement is bounded by 2n — that's O(n) time. The dict holds at most one entry per distinct character, so space is O(min(n, k)) where k is the alphabet size; for ASCII that's O(1) in practice, but I'd state it as O(n) if the alphabet is unbounded."*
 
 That is a derivation. It names the quantity being counted, ties it to a loop or a structure in the code, and it is checkable.
 
@@ -533,14 +529,14 @@ Watch for the specific traps:
 
 - **A loop inside a loop is not automatically O(n²).** In amortized structures — sliding window, monotonic stack — the inner loop's *total* work across the whole outer loop is O(n). Say the word "amortized" and explain: *"the inner while looks quadratic, but each element is pushed and popped at most once, so it's O(n) overall."* This is one of the highest-value sentences in the coding round; a lot of candidates report O(n²) for a linear algorithm and get marked down for analysis they could have done.
 - **Sorting is O(n log n) and it dominates a linear pass.** If you sorted, your answer is O(n log n), full stop.
-- **Built-ins have costs.** \`Array.prototype.includes\` is O(n). String concatenation in a loop can be O(n²). Slicing copies.
+- **Built-ins have costs, and Python hides them well.** \`x in some_list\` is O(n) while \`x in some_set\` is O(1) — swapping the container is often the whole optimization. Building a string with \`+=\` in a loop is O(n²); use \`"".join(parts)\`. \`s[a:b]\` copies, so slicing inside a loop can turn a linear scan quadratic. \`list.pop(0)\` is O(n) — that is what \`collections.deque\` is for. \`sorted()\` is O(n log n). \`min\`/\`max\`/\`sum\` over a list are each a full O(n) pass, so calling one inside a loop is a hidden nested loop.
 
 ## Always give space, and count the stack
 
 Space is the half candidates forget. Cover three sources:
 
-1. **Auxiliary structures** — maps, sets, arrays you allocated.
-2. **The recursion stack** — depth × frame size. A DFS on a tree is O(h), which is O(log n) balanced and O(n) in the degenerate case; on a graph with n nodes it is O(n). Naming the recursion stack unprompted is a reliable signal that you have thought about this before.
+1. **Auxiliary structures** — dicts, sets, lists you allocated.
+2. **The recursion stack** — depth × frame size. A DFS on a tree is O(h), which is O(log n) balanced and O(n) in the degenerate case; on a graph with n nodes it is O(n). Naming the recursion stack unprompted is a reliable signal that you have thought about this before — and in Python it is worth adding that the default recursion limit is 1000 frames, so a degenerate input of 10⁵ nodes needs an explicit stack rather than recursion.
 3. **The output** — usually excluded by convention, but say so: *"O(n) for the output, O(1) auxiliary."*
 
 ## Say what dominates and why
@@ -556,7 +552,7 @@ That sentence shows you can reason about which input regime you are in, which is
 This question is not always a hint. Sometimes it is a test of whether you know your bound is optimal. Have an answer in one of these three shapes:
 
 - **"No, and here's the argument."** *"Any correct solution has to look at every element at least once — if it skipped one, an adversary could change that element and flip the answer. So O(n) is a lower bound, and we're at O(n)."* This is the strongest possible answer and it is worth being able to produce.
-- **"Yes, in this dimension, at this cost."** *"Time is already linear, but I could drop space from O(n) to O(1) if the alphabet is fixed by using a 26-slot array instead of a map."*
+- **"Yes, in this dimension, at this cost."** *"Time is already linear, but I could drop space from O(n) to O(1) if the alphabet is fixed by using a 26-slot list instead of a dict."*
 - **"I'm not sure — here's what I'd look at."** *"I don't see how to beat O(n log n). The only lever I see is avoiding the sort, which would need the values to be bounded so I could count them. Is that the direction?"* Honest and directed beats a confident guess.
 
 Never answer "can you do better?" with a flat "no" and nothing else. If it turns out you can, you have just claimed something false about your own solution.`,
@@ -675,19 +671,19 @@ s = "abba"       ->  2     ("ab" or "ba")
 
 **Candidate:** Brute force first. I'd take every start index, extend to the right while tracking characters I've seen in a set, and stop when I hit a repeat, keeping the best length. That's O(n²) time — n starts, up to n extensions each — and O(k) space for the set, where k is the alphabet size, so O(1) for ASCII. With n at 10⁵ that's 10¹⁰ operations, way too slow, so we need better.
 
-**Candidate:** I think we can get to linear. The observation is that the brute force redoes work: when I restart at index one, I re-scan almost the same characters I just scanned. Instead I can keep a window \`[windowStart, right]\` that always contains distinct characters, extend \`right\` one step at a time, and when the new character is already inside the window, move \`windowStart\` forward past the previous occurrence. Every index enters and leaves the window once, so it's O(n).
+**Candidate:** I think we can get to linear. The observation is that the brute force redoes work: when I restart at index one, I re-scan almost the same characters I just scanned. Instead I can keep a window \`[window_start, right]\` that always contains distinct characters, extend \`right\` one step at a time, and when the new character is already inside the window, move \`window_start\` forward past the previous occurrence. Every index enters and leaves the window once, so it's O(n).
 
 **Candidate:** Do you want me to code the brute force first, or go straight to the sliding window?
 
-**Interviewer:** Go straight to the window. Before you do — when you say "move \`windowStart\` forward past the previous occurrence," how do you find that occurrence?
+**Interviewer:** Go straight to the window. Before you do — when you say "move \`window_start\` forward past the previous occurrence," how do you find that occurrence?
 
 *(A textbook brute force statement: the procedure, the complexity, the repeated work it does, and the mechanism of the fix. Then he handed the pacing decision over. The interviewer's follow-up is a level-1 nudge aimed at the exact hole in his plan.)*
 
 **[5:40]**
 
-**Candidate:** Right — good question, I hadn't pinned that down. Two options. One: keep a \`Set\` of the characters in the window, and when I hit a duplicate, remove characters from the left one at a time until the duplicate is gone. That's still O(n) overall because each character is removed at most once, but it's an inner while loop. Two: keep a \`Map\` from character to its most recent index, and when I see a duplicate I jump \`windowStart\` straight past it in one step — no inner loop.
+**Candidate:** Right — good question, I hadn't pinned that down. Two options. One: keep a \`set\` of the characters currently in the window, and when I hit a duplicate, \`discard\` characters from the left one at a time until the duplicate is gone. That's still O(n) overall because each character is removed at most once, but it's an inner \`while\` loop. Two: keep a \`dict\` from character to its most recent index, and when I see a duplicate I jump \`window_start\` straight past it in one step — no inner loop.
 
-**Candidate:** I'd go with the map. Same complexity but the code is flatter, and it makes the jump explicit instead of implicit. My one worry is that the stored index might be *behind* my current window start — from a character that already left the window — and then jumping to it would move the start backwards. I'll need to guard that. Does the map approach sound right to you before I start?
+**Candidate:** I'd go with the dict. Same complexity but the code is flatter, and it makes the jump explicit instead of implicit. It also means one lookup per character instead of a set plus a set of removals. My one worry is that the stored index might be *behind* my current window start — from a character that already left the window — and then jumping to it would move the start backwards. I'll need to guard that. Does the dict approach sound right to you before I start?
 
 **Interviewer:** It does. Go ahead.
 
@@ -697,30 +693,25 @@ s = "abba"       ->  2     ("ab" or "ba")
 
 **Candidate:** I'll write the signature and the return first, then fill in the loop.
 
-\`\`\`ts
-function lengthOfLongestSubstring(s: string): number {
-  // Character -> the most recent index at which we saw it.
-  const lastSeen = new Map<string, number>();
-  let windowStart = 0;
-  let best = 0;
+\`\`\`python
+def length_of_longest_substring(s: str) -> int:
+    # Character -> the most recent index at which we saw it.
+    last_seen: dict[str, int] = {}
+    window_start = 0
+    best = 0
 
-  for (let right = 0; right < s.length; right++) {
-    const ch = s[right];
-    const previousIndex = lastSeen.get(ch);
-    if (previousIndex !== undefined) {
-      windowStart = previousIndex + 1;
-    }
-    lastSeen.set(ch, right);
-    best = Math.max(best, right - windowStart + 1);
-  }
+    for right, ch in enumerate(s):
+        if ch in last_seen:
+            window_start = last_seen[ch] + 1
+        last_seen[ch] = right
+        best = max(best, right - window_start + 1)
 
-  return best;
-}
+    return best
 \`\`\`
 
-**Candidate:** One thing I want to state explicitly: my window is inclusive on both ends, \`[windowStart, right]\`, so its length is \`right - windowStart + 1\`. And \`right\` runs to \`s.length - 1\` because I'm indexing \`s[right]\` directly, not \`s[right + 1]\`.
+**Candidate:** A couple of things I want to state explicitly. I'm using \`enumerate\` rather than \`range(len(s))\` so the index and the character can't get out of sync. And my window is inclusive on both ends, \`[window_start, right]\`, so its length is \`right - window_start + 1\` — that matters because the equivalent slice \`s[window_start:right + 1]\` is half-open, and I don't want to mix the two conventions by accident.
 
-*(The interval convention is now on the record, which is what makes the bug findable in ninety seconds instead of five minutes. Names are real words. \`const\` where nothing is reassigned.)*
+*(The interval convention is now on the record, which is what makes the bug findable in ninety seconds instead of five minutes. Names are real words, the dict is annotated so its key and value meaning is documented, and the one comment is load-bearing.)*
 
 **[12:00]**
 
@@ -728,7 +719,7 @@ function lengthOfLongestSubstring(s: string): number {
 
 **Candidate:** Let me trace \`"abcabcbb"\` first, since I know that should return 3.
 
-| right | ch | previousIndex | windowStart | best |
+| right | ch | prev index of ch | window_start | best |
 | --- | --- | --- | --- | --- |
 | 0 | a | — | 0 | 1 |
 | 1 | b | — | 0 | 2 |
@@ -741,38 +732,37 @@ function lengthOfLongestSubstring(s: string): number {
 
 **Candidate:** Returns 3. Correct. Now the one I was worried about — \`"abba"\`, which should be 2.
 
-| right | ch | previousIndex | windowStart | best |
+| right | ch | prev index of ch | window_start | best |
 | --- | --- | --- | --- | --- |
 | 0 | a | — | 0 | 1 |
 | 1 | b | — | 0 | 2 |
 | 2 | b | 1 | 2 | 2 |
 | 3 | a | 0 | **1** | **3** |
 
-**Candidate:** There's the bug. At \`right = 3\` the character is \`a\`, whose last index is 0 — but that \`a\` already fell out of the window when \`windowStart\` moved to 2. So I set \`windowStart\` *backwards* from 2 to 1, the window becomes \`"bba"\`, which has a repeat in it, and I return 3 instead of 2. This is exactly the case I flagged before coding and then forgot to actually guard.
+**Candidate:** There's the bug. At \`right = 3\` the character is \`a\`, and \`'a' in last_seen\` is true with \`last_seen['a']\` equal to 0 — but that \`a\` already fell out of the window when \`window_start\` moved to 2. So I set \`window_start\` *backwards* from 2 to 1, the window becomes \`s[1:4]\` which is \`"bba"\`, that has a repeat in it, and I return 3 instead of 2. This is exactly the case I flagged before coding and then forgot to actually guard.
 
-**Candidate:** The fix is that \`windowStart\` must never move backwards. I'll only jump when the previous index is inside the current window — or equivalently, take the max.
+**Candidate:** The fix is that \`window_start\` must never move backwards. I'll only jump when the previous index is still inside the current window:
 
-\`\`\`ts
-if (previousIndex !== undefined && previousIndex >= windowStart) {
-  windowStart = previousIndex + 1;
-}
+\`\`\`python
+if ch in last_seen and last_seen[ch] >= window_start:
+    window_start = last_seen[ch] + 1
 \`\`\`
 
-**Candidate:** Re-tracing the last row: \`right = 3\`, \`previousIndex\` is 0, \`windowStart\` is 2, and 0 is not ≥ 2, so we don't move. Length is \`3 - 2 + 1\`, which is 2, and \`best\` stays 2. Correct.
+**Candidate:** Re-tracing the last row: \`right = 3\`, \`last_seen['a']\` is 0, \`window_start\` is 2, and 0 is not ≥ 2, so we don't move. Length is \`3 - 2 + 1\`, which is 2, and \`best\` stays 2. Correct.
 
-**Interviewer:** Nice catch. Is there a reason you preferred the explicit condition over \`Math.max\`?
+**Interviewer:** Nice catch. Is there a reason you preferred the explicit condition over \`max\`?
 
-**Candidate:** Mostly readability — the condition names the actual rule, which is "only jump if the duplicate is still inside the window." \`Math.max(windowStart, previousIndex + 1)\` is one line shorter and identical in behavior, and I'd be happy with either. I'll keep the explicit version since it documents the invariant.
+**Candidate:** Mostly readability — the condition names the actual rule, which is "only jump if the duplicate is still inside the window." The one-liner is \`window_start = max(window_start, last_seen.get(ch, -1) + 1)\`, which is shorter and identical in behavior — \`get\` with a default of \`-1\` makes the absent case fall out as \`max(window_start, 0)\`. I'd be happy with either. I'll keep the explicit version since it documents the invariant, and the \`-1\` sentinel is the kind of thing that reads as clever until someone has to reason about it.
 
 *(This is the highest-value stretch of the round. He found his own bug, on an input he constructed at minute two, before the interviewer said anything. He stated the symptom, the cause, and the fix separately, then re-verified the specific failing row rather than the whole trace. And he defended a style choice with a reason instead of caving or getting defensive.)*
 
 **[19:00]**
 
-**Candidate:** Let me finish the edge cases. Empty string: \`s.length\` is 0, the loop body never runs, \`best\` is still 0, we return 0 — matches what we agreed. Single character \`"a"\`: one iteration, \`previousIndex\` is undefined, \`best\` becomes 1. All-same, \`"bbbb"\`: at each step the previous index is exactly \`windowStart\`, so the window slides one at a time and \`best\` stays 1. That's the branch I was least sure of, and it's the one that goes through the new \`>=\` comparison at equality, so I wanted to check it specifically.
+**Candidate:** Let me finish the edge cases. Empty string: \`enumerate("")\` yields nothing, the loop body never runs, \`best\` is still 0, we return 0 — matches what we agreed. Single character \`"a"\`: one iteration, \`'a' in last_seen\` is false, \`best\` becomes 1. All-same, \`"bbbb"\`: at each step the previous index is exactly \`window_start\`, so the window slides one at a time and \`best\` stays 1. That's the branch I was least sure of, and it's the one that goes through the new \`>=\` comparison at equality, so I wanted to check it specifically.
 
 **Interviewer:** Good. What about a string with spaces or symbols?
 
-**Candidate:** Nothing special — I'm keying the map on the character itself, so \`" "\` and \`"!"\` behave like any other character. It'd only matter if I'd optimized to a 128-slot array indexed by char code, in which case I'd need to be sure the input really is ASCII. Which is actually a reasonable optimization here: since you said ASCII, I could swap the \`Map\` for a \`Int32Array(128)\` of last-seen indices initialized to -1. Same time complexity, lower constant factor, and space becomes strictly O(1). I'd probably keep the map for clarity unless this were on a hot path.
+**Candidate:** Nothing special — I'm keying the dict on the character itself, so \`" "\` and \`"!"\` behave like any other character. It'd only matter if I'd optimized to a 128-slot list indexed by code point, in which case I'd need to be sure the input really is ASCII. Which is actually a reasonable optimization here: since you said ASCII, I could swap the dict for \`last_seen = [-1] * 128\` and index it with \`ord(ch)\`, with \`-1\` meaning never seen. Same time complexity, lower constant factor, and space becomes strictly O(1). I'd probably keep the dict for clarity unless this were on a hot path — and I'd note that with a list I'd have to remember \`ord\`, whereas the dict version works unchanged if you later tell me the input is Unicode.
 
 *(Unprompted alternative implementation with an explicit tradeoff and a stated default. This is the difference between hire and strong hire on problem solving.)*
 
@@ -780,13 +770,13 @@ if (previousIndex !== undefined && previousIndex >= windowStart) {
 
 **Interviewer:** Give me the complexity.
 
-**Candidate:** Time is O(n). \`right\` advances exactly n times, and \`windowStart\` only ever moves forward, so across the whole run it advances at most n times total — the two pointers together do at most 2n steps of work, and everything inside the loop is a constant-time map operation. So linear, and the map lookups are O(1) average case.
+**Candidate:** Time is O(n). \`right\` advances exactly n times because \`enumerate\` walks the string once, and \`window_start\` only ever moves forward, so across the whole run it advances at most n times total — the two pointers together do at most 2n steps of work, and everything inside the loop is a constant-time dict operation. So linear, and the dict lookups are O(1) average case. Worth flagging that I'm not slicing inside the loop; \`s[window_start:right + 1]\` would copy and make it quadratic.
 
-**Candidate:** Space is O(min(n, k)) where k is the alphabet size. The map holds at most one entry per *distinct* character, so with ASCII it's capped at 128 entries, which is O(1) for this problem. If the alphabet were unbounded — full Unicode, say — I'd state it as O(n). No recursion, so no stack cost, and the output is a single integer.
+**Candidate:** Space is O(min(n, k)) where k is the alphabet size. The dict holds at most one entry per *distinct* character, so with ASCII it's capped at 128 entries, which is O(1) for this problem. If the alphabet were unbounded — full Unicode, say — I'd state it as O(n). No recursion, so no stack cost, and the output is a single integer.
 
 **Interviewer:** Can you do better than O(n)?
 
-**Candidate:** Not on time, and I think that's provable rather than just "I can't see it." Any correct algorithm has to read every character at least once: if it skipped index \`i\`, I could change the character at \`i\` and change the answer, and the algorithm couldn't tell. So O(n) is a lower bound and we're at it. On space, as I mentioned, I can go from a map to a fixed 128-slot array, which is a constant-factor win rather than an asymptotic one — but it does turn the bound from "O(min(n, k))" into a hard O(1).
+**Candidate:** Not on time, and I think that's provable rather than just "I can't see it." Any correct algorithm has to read every character at least once: if it skipped index \`i\`, I could change the character at \`i\` and change the answer, and the algorithm couldn't tell. So O(n) is a lower bound and we're at it. On space, as I mentioned, I can go from a dict to a fixed 128-slot list, which is a constant-factor win rather than an asymptotic one — but it does turn the bound from "O(min(n, k))" into a hard O(1).
 
 *(He derived instead of reciting, gave the amortized argument for why two nested pointers are still linear, gave space with the alphabet caveat, mentioned the absent recursion stack, and answered "can you do better" with an adversary argument. That last answer is what separates candidates who know the bound from candidates who memorized the number.)*
 
@@ -794,7 +784,7 @@ if (previousIndex !== undefined && previousIndex >= windowStart) {
 
 **Interviewer:** Last thing — suppose I asked you to return the substring itself, not the length.
 
-**Candidate:** I'd track the start index of the best window alongside the length. Right now when \`right - windowStart + 1\` beats \`best\` I only update \`best\`; I'd add a \`bestStart = windowStart\` in that same branch, which means switching from \`Math.max\` to an explicit \`if\` so I can update both together. Then at the end, \`s.slice(bestStart, bestStart + best)\`. Same time complexity; space goes to O(n) because the returned substring is up to n characters — though by convention we usually exclude output space. Want me to write it?
+**Candidate:** I'd track the start index of the best window alongside the length. Right now when \`right - window_start + 1\` beats \`best\` I only update \`best\`; I'd add a \`best_start = window_start\` in that same branch, which means switching from \`max\` to an explicit \`if\` so I can update both together. Then at the end, \`return s[best_start:best_start + best]\` — and I'd say out loud that that slice is half-open, so \`best_start + best\` is exclusive and correct rather than one too many. Same time complexity; space goes to O(n) because the returned substring is up to n characters and the slice copies — though by convention we usually exclude output space. Want me to write it?
 
 **Interviewer:** No, that's exactly right. Let's stop there. Any questions for me?
 
@@ -812,9 +802,9 @@ if (previousIndex !== undefined && previousIndex >= windowStart) {
 
 ## What the debrief said
 
-> **Problem solving — Hire.** Stated brute force with complexity and identified the repeated work driving the optimization. Needed one small nudge on how to locate the previous occurrence; ran with it immediately and produced two options with a real tradeoff. Volunteered the fixed-array optimization unprompted. Correct adversary argument for the linear lower bound.
+> **Problem solving — Hire.** Stated brute force with complexity and identified the repeated work driving the optimization. Needed one small nudge on how to locate the previous occurrence; ran with it immediately and produced two options with a real tradeoff. Volunteered the fixed-size-list optimization unprompted. Correct adversary argument for the linear lower bound.
 >
-> **Coding — Strong hire.** Clean first draft. Real variable names, one load-bearing comment, no nesting, stated the interval convention out loud before writing the length formula.
+> **Coding — Strong hire.** Clean first draft. Real \`snake_case\` names, an annotated dict, one load-bearing comment, no nesting, used \`enumerate\` rather than index arithmetic, stated the interval convention out loud before writing the length formula.
 >
 > **Verification — Strong hire.** Constructed the adversarial input at minute two, before coding. Traced with a table and real values, found his own bug, separated symptom from cause, re-verified only the failing row. Covered empty, single, and all-same deliberately, and named which branch he trusted least.
 >
@@ -828,8 +818,8 @@ Note what is not in that debrief: he was not fast, he wrote a bug, and he needed
   questions: [
     {
       q: "Walk me through exactly what you'd say in the first three minutes of a coding round.",
-      a: "Read the problem twice without talking. Then ask three or four clarifying questions in one bundle — input size, value ranges (negatives, duplicates, empty), what to return when there's no valid answer, and any mutation or memory constraints. Then restate the problem back in one sentence and get confirmation: \"So given up to 10⁵ integers that may repeat, I return the indices of the pair summing to target, or an empty array if none exists — is that right?\" Then write one small non-degenerate example and its expected output where they can see it. That's about ninety seconds of talking and it has locked down my target complexity, my edge cases, my return contract, and my first test case.",
-      weak: "I'd introduce myself, read the problem, and ask if I can use any language I want and whether I should handle null inputs. Then I'd start coding so I don't run out of time — I can figure out the details as I go.",
+      a: "Read the problem twice without talking. Then ask three or four clarifying questions in one bundle — input size, value ranges (negatives, duplicates, empty), what to return when there's no valid answer, and any mutation or memory constraints. Then restate the problem back in one sentence and get confirmation: \"So given up to 10⁵ integers that may repeat, I return the indices of the pair summing to target, or an empty list if none exists — is that right?\" Then write one small non-degenerate example and its expected output where they can see it. That's about ninety seconds of talking and it has locked down my target complexity, my edge cases, my return contract, and my first test case.",
+      weak: "I'd introduce myself, read the problem, and ask if I can use any language I want and whether I should handle \`None\` inputs. Then I'd start coding so I don't run out of time — I can figure out the details as I go.",
     },
     {
       q: "Why should you state the brute force before optimizing, even when you already see the optimal solution?",
@@ -843,7 +833,7 @@ Note what is not in that debrief: he was not fast, he wrote a bug, and he needed
     },
     {
       q: "Your interviewer says \"are you sure about that line?\" What does that mean and how do you respond?",
-      a: "It means there's a bug on that line. Interviewers don't ask that about correct code. So I don't defend it and I don't just stare — I trace that specific line with real values out loud: \"Let me run it — if s is 'abba' and right is 3, previousIndex is 0 and windowStart is 2, so I'd set windowStart to 1, which moves it backwards. Yeah, that's wrong.\" Then I state the cause and the fix. Finding it myself after the pointer still counts for a lot; arguing that the line is fine costs me on both verification and communication.",
+      a: "It means there's a bug on that line. Interviewers don't ask that about correct code. So I don't defend it and I don't just stare — I trace that specific line with real values out loud: \"Let me run it — if s is 'abba' and right is 3, last_seen['a'] is 0 and window_start is 2, so I'd set window_start to 1, which moves it backwards. Yeah, that's wrong.\" Then I state the cause and the fix. Finding it myself after the pointer still counts for a lot; arguing that the line is fine costs me on both verification and communication.",
       weak: "I'd re-read it and say \"yeah, I think that's right\" unless I could see something wrong, then wait for them to tell me what they meant.",
     },
     {
@@ -863,22 +853,22 @@ Note what is not in that debrief: he was not fast, he wrote a bug, and he needed
     },
     {
       q: "You find a bug in your own code while tracing. What exactly do you say?",
-      a: "Symptom, cause, fix — calmly, no apologizing. \"There's a bug here. On 'abba', when I reach the second 'a', its last index is 0, which is already behind my window start, so I move windowStart backwards and the window becomes invalid — it returns 3 instead of 2. The fix is to only jump forward, so I'll guard on previousIndex being at least windowStart.\" Then I re-trace just the failing row to confirm. Finding my own bug scores higher than never having written it, because it proves my code is correct when nobody's watching — which is the actual question about an intern.",
+      a: "Symptom, cause, fix — calmly, no apologizing. \"There's a bug here. On 'abba', when I reach the second 'a', its last index is 0, which is already behind my window start, so I move window_start backwards and the window becomes invalid — it returns 3 instead of 2. The fix is to only jump forward, so I'll guard on last_seen[ch] being at least window_start, or write it as window_start = max(window_start, last_seen[ch] + 1).\" Then I re-trace just the failing row to confirm. Finding my own bug scores higher than never having written it, because it proves my code is correct when nobody's watching — which is the actual question about an intern.",
       weak: "I'd say \"oh sorry, that's wrong, let me fix that\" and change the line, then move on quickly so it doesn't take up too much time.",
     },
     {
       q: "What's the space complexity of your solution?",
-      a: "I answer in three parts and I volunteer it without being asked. Auxiliary structures: the map holds at most one entry per distinct character, so O(min(n, k)) where k is the alphabet size — for ASCII that's a hard cap of 128, so O(1) in practice. Recursion stack: none here, but for a DFS I'd say O(h), which is O(log n) on a balanced tree and O(n) in the degenerate case. Output: a single integer, and I'd note when the output itself is O(n) even though convention usually excludes it. Forgetting the recursion stack is the most common miss.",
-      weak: "It's O(n) because I'm using a hash map.",
+      a: "I answer in three parts and I volunteer it without being asked. Auxiliary structures: the dict holds at most one entry per distinct character, so O(min(n, k)) where k is the alphabet size — for ASCII that's a hard cap of 128, so O(1) in practice. Recursion stack: none here, but for a DFS I'd say O(h), which is O(log n) on a balanced tree and O(n) in the degenerate case — and in Python the default recursion limit of 1000 frames means a degenerate input needs an explicit stack instead. Output: a single integer, and I'd note when the output itself is O(n) even though convention usually excludes it. Forgetting the recursion stack is the most common miss.",
+      weak: "It's O(n) because I'm using a dict.",
     },
     {
       q: "The interviewer asks \"can you do better?\" after you've given a correct O(n) solution. What's going on?",
-      a: "It's not always a hint — often it's testing whether I know my bound is optimal. So I answer with an argument rather than a guess. Here: any correct algorithm has to read every character at least once, because if it skipped index i, an adversary could change the character at i and flip the answer without the algorithm noticing. So O(n) is a lower bound and I'm at it. Then I offer the dimension where I *can* improve: swapping the map for a fixed 128-slot array makes space a hard O(1). If I genuinely don't know, I say what I'd look at and ask if that's the direction — but I never just say \"no\" with nothing behind it.",
+      a: "It's not always a hint — often it's testing whether I know my bound is optimal. So I answer with an argument rather than a guess. Here: any correct algorithm has to read every character at least once, because if it skipped index i, an adversary could change the character at i and flip the answer without the algorithm noticing. So O(n) is a lower bound and I'm at it. Then I offer the dimension where I *can* improve: swapping the dict for a fixed 128-slot list indexed by \`ord(ch)\` makes space a hard O(1). If I genuinely don't know, I say what I'd look at and ask if that's the direction — but I never just say \"no\" with nothing behind it.",
       weak: "I'd say no, this is already linear and you can't do better than that.",
     },
     {
       q: "Which clarifying questions actually matter, and how do you decide?",
-      a: "The filter is: can I name both branches? \"If they say yes I do X, if they say no I do Y.\" If I can't finish that sentence, the question is decoration and I cut it. The ones that almost always pass are input size (sets my target complexity), value ranges — negatives, duplicates, empty (kills or saves whole approaches), whether I can mutate the input (in-place vs O(n) extra), and what to return when there's no answer (that's a real branch in my code). The ones that fail are anything the prompt already said, asking about null five separate times instead of \"can I assume well-formed input\", and \"can I use a hash map\" — the answer is always yes.",
+      a: "The filter is: can I name both branches? \"If they say yes I do X, if they say no I do Y.\" If I can't finish that sentence, the question is decoration and I cut it. The ones that almost always pass are input size (sets my target complexity), value ranges — negatives, duplicates, empty (kills or saves whole approaches), whether I can mutate the input (in-place vs O(n) extra), and what to return when there's no answer (that's a real branch in my code). The ones that fail are anything the prompt already said, asking about \`None\` five separate times instead of \"can I assume well-formed input\", and \"can I use a dict\" — the answer is always yes.",
       weak: "I try to ask as many as I can think of to show I'm thorough about requirements and I don't make assumptions.",
     },
     {
@@ -888,12 +878,12 @@ Note what is not in that debrief: he was not fast, he wrote a bug, and he needed
     },
     {
       q: "Your code produces the wrong output on a test case. Walk me through how you debug it live.",
-      a: "Shrink first: find the smallest input that still fails, so there's less state to hold. Then form a hypothesis *before* touching anything — \"I think windowStart is moving backwards when the duplicate is outside the window; if so, on 'abba' at index 3 it should be 1 when it ought to be 2.\" Then check that one value. Confirmed means I fix the actual cause; refuted means I've eliminated something. If reading doesn't find it, I bisect: check whether the state is correct halfway through the loop body, which tells me if the bug is upstream or downstream. What I don't do is shotgun-edit — flipping < to <= and moving lines until the symptom disappears is very visible from the other side and leaves me unable to explain why the code is correct.",
+      a: "Shrink first: find the smallest input that still fails, so there's less state to hold. Then form a hypothesis *before* touching anything — \"I think window_start is moving backwards when the duplicate is outside the window; if so, on 'abba' at index 3 it should be 1 when it ought to be 2.\" Then check that one value. Confirmed means I fix the actual cause; refuted means I've eliminated something. If reading doesn't find it, I bisect: check whether the state is correct halfway through the loop body, which tells me if the bug is upstream or downstream. What I don't do is shotgun-edit — flipping < to <= and moving lines until the symptom disappears is very visible from the other side and leaves me unable to explain why the code is correct.",
       weak: "I'd look at the line where it goes wrong and try changing the condition — usually it's an off-by-one, so adjusting the bounds and re-checking the example is fastest.",
     },
     {
       q: "How do you decide when to stop discussing and start typing?",
-      a: "Minute fifteen is a hard commit deadline in a 45-minute round. I can still be wrong at fifteen; I can't still be undecided. Coding takes about eighteen minutes and testing takes seven, so anything past fifteen eats into the part where I demonstrate verification. The trigger sentence is: \"I want to start coding — I'll go with the hash-map approach and I'll flag it if I hit a wall.\" The mirror-image mistake is worse than people think though: starting to type at minute three because silence feels like failure. Approach failures cost far more than typing failures, because typing is fast and rethinking with an interviewer watching is not.",
+      a: "Minute fifteen is a hard commit deadline in a 45-minute round. I can still be wrong at fifteen; I can't still be undecided. Coding takes about eighteen minutes and testing takes seven, so anything past fifteen eats into the part where I demonstrate verification. The trigger sentence is: \"I want to start coding — I'll go with the dict approach and I'll flag it if I hit a wall.\" The mirror-image mistake is worse than people think though: starting to type at minute three because silence feels like failure. Approach failures cost far more than typing failures, because typing is fast and rethinking with an interviewer watching is not.",
     },
     {
       q: "What are interviewers actually scoring, and where do interns most often lose points?",

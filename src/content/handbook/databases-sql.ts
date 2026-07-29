@@ -641,50 +641,96 @@ Without this, a crash between the two statements destroys 100 units of money. Th
 
 ### Transactions in application code
 
-\`\`\`ts
-export async function transferFunds(fromId: string, toId: string, cents: number) {
-  return withTransaction(async (client) => {
-    // Lock both rows, always in a consistent order (see the deadlock section).
-    const { rows } = await client.query(
-      "select id, balance from accounts where id = any($1::uuid[]) order by id for update",
-      [[fromId, toId].sort()],
-    );
-    if (rows.length !== 2) throw new NotFoundError("Account not found.");
+\`\`\`python
+from uuid import UUID
 
-    const from = rows.find((r) => r.id === fromId)!;
-    if (from.balance < cents) throw new ConflictError("Insufficient funds.");
+import asyncpg
 
-    await client.query("update accounts set balance = balance - $2 where id = $1", [fromId, cents]);
-    await client.query("update accounts set balance = balance + $2 where id = $1", [toId, cents]);
-    await client.query(
-      "insert into ledger (from_id, to_id, amount_cents) values ($1, $2, $3)",
-      [fromId, toId, cents],
-    );
-  });
-}
+
+class NotFoundError(Exception):
+    """Maps to HTTP 404."""
+
+
+class ConflictError(Exception):
+    """Maps to HTTP 409."""
+
+
+async def transfer_funds(
+    pool: asyncpg.Pool, from_id: UUID, to_id: UUID, cents: int
+) -> None:
+    # acquire() returns the connection to the pool on exit, even if the body raises.
+    async with pool.acquire() as conn:
+        # transaction() issues BEGIN, then COMMIT on success, ROLLBACK on a raise.
+        async with conn.transaction():
+            # Lock both rows, always in a consistent order (see the deadlock section).
+            rows = await conn.fetch(
+                """
+                select id, balance
+                  from accounts
+                 where id = any($1::uuid[])
+                 order by id
+                   for update
+                """,
+                sorted([from_id, to_id]),
+            )
+            if len(rows) != 2:
+                raise NotFoundError("Account not found.")
+
+            source = next(row for row in rows if row["id"] == from_id)
+            if source["balance"] < cents:
+                raise ConflictError("Insufficient funds.")
+
+            await conn.execute(
+                "update accounts set balance = balance - $2 where id = $1",
+                from_id,
+                cents,
+            )
+            await conn.execute(
+                "update accounts set balance = balance + $2 where id = $1",
+                to_id,
+                cents,
+            )
+            await conn.execute(
+                "insert into ledger (from_id, to_id, amount_cents)"
+                " values ($1, $2, $3)",
+                from_id,
+                to_id,
+                cents,
+            )
 \`\`\`
 
 Rules that matter in production:
 
 - **Keep transactions short.** An open transaction holds locks and pins the oldest snapshot, which prevents vacuum from cleaning up dead rows — the cause of unbounded table bloat.
 - **Never do I/O inside a transaction.** An HTTP call to Stripe inside \`BEGIN...COMMIT\` holds a database connection open for the duration of a network round trip. Under load that exhausts the pool and takes the service down.
-- **Release the connection in a \`finally\`.** A throw between \`connect()\` and \`release()\` leaks a connection permanently; do it enough times and every request hangs waiting for the pool.
+- **Always acquire the connection with \`async with\`.** \`async with pool.acquire()\` returns the connection even when the body raises. A connection taken with a bare \`await pool.acquire()\` and lost on an exception path leaks permanently; do it enough times and every request hangs waiting for the pool.
 - **Savepoints** give partial rollback inside a transaction: \`savepoint s1; ... rollback to s1;\`. Useful when one optional step is allowed to fail.
 
 ### Read-modify-write is the classic bug
 
-\`\`\`ts
-// BROKEN even inside a transaction at READ COMMITTED: two concurrent runs both
-// read 100 and both write 90, so two withdrawals cost only 10.
-const { rows } = await client.query("select balance from accounts where id = $1", [id]);
-await client.query("update accounts set balance = $2 where id = $1", [id, rows[0].balance - 10]);
+\`\`\`python
+async def withdraw_broken(conn: asyncpg.Connection, account_id: UUID) -> None:
+    """BROKEN even inside a transaction at READ COMMITTED: two concurrent runs
+    both read 100 and both write 90, so two withdrawals cost only 10."""
+    balance = await conn.fetchval(
+        "select balance from accounts where id = $1", account_id
+    )
+    await conn.execute(
+        "update accounts set balance = $2 where id = $1", account_id, balance - 10
+    )
 
-// Correct: let the database compute from the current value, atomically.
-await client.query(
-  "update accounts set balance = balance - 10 where id = $1 and balance >= 10",
-  [id],
-);
-// rowCount === 0 means insufficient funds — no separate check needed.
+
+async def withdraw(conn: asyncpg.Connection, account_id: UUID) -> None:
+    """Correct: let the database compute from the current value, atomically."""
+    status = await conn.execute(
+        "update accounts set balance = balance - 10"
+        " where id = $1 and balance >= 10",
+        account_id,
+    )
+    # asyncpg returns the command tag, so "UPDATE 0" means the predicate matched
+    # nothing — insufficient funds, with no separate read-and-check step.
+    if status == "UPDATE 0":
+        raise ConflictError("Insufficient funds.")
 \`\`\`
 
 The fix is to make the update *relative* rather than absolute, or to take a lock with \`SELECT ... FOR UPDATE\`. Recognizing this pattern is what the whole isolation-level discussion is ultimately about.`,
@@ -723,32 +769,36 @@ The fix is to make the update *relative* rather than absolute, or to take a lock
 
 **Serializable** (SSI — Serializable Snapshot Isolation): Postgres tracks read/write dependencies between concurrent transactions and aborts any that would produce a result no serial ordering could. It gives you the strongest guarantee without traditional read locks, so it's far cheaper than the old two-phase-locking implementations — but **your application must handle \`40001\` and retry.**
 
-\`\`\`ts
-export async function withSerializableRetry<T>(
-  fn: (client: PoolClient) => Promise<T>,
-  maxAttempts = 3,
-): Promise<T> {
-  for (let attempt = 1; ; attempt++) {
-    const client = await pool.connect();
-    try {
-      await client.query("begin isolation level serializable");
-      const result = await fn(client);
-      await client.query("commit");
-      return result;
-    } catch (err: unknown) {
-      await client.query("rollback").catch(() => {});
-      const code = (err as { code?: string }).code;
-      // 40001 serialization_failure, 40P01 deadlock_detected — both are retryable.
-      if ((code === "40001" || code === "40P01") && attempt < maxAttempts) {
-        await new Promise((r) => setTimeout(r, 2 ** attempt * 10 + Math.random() * 20));
-        continue;
-      }
-      throw err;
-    } finally {
-      client.release();
-    }
-  }
-}
+\`\`\`python
+import asyncio
+import random
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
+
+import asyncpg
+
+T = TypeVar("T")
+
+# 40001 serialization_failure, 40P01 deadlock_detected — both are retryable.
+RETRYABLE_SQLSTATES = frozenset({"40001", "40P01"})
+
+
+async def with_serializable_retry(
+    pool: asyncpg.Pool,
+    fn: Callable[[asyncpg.Connection], Awaitable[T]],
+    max_attempts: int = 3,
+) -> T:
+    for attempt in range(1, max_attempts + 1):
+        try:
+            async with pool.acquire() as conn:
+                async with conn.transaction(isolation="serializable"):
+                    return await fn(conn)
+        except asyncpg.PostgresError as err:
+            if err.sqlstate not in RETRYABLE_SQLSTATES or attempt == max_attempts:
+                raise
+            # Full jitter, so competing transactions don't retry in lockstep.
+            await asyncio.sleep(random.uniform(0, 0.01 * 2**attempt))
+    raise AssertionError("unreachable")
 \`\`\`
 
 ### Write skew — the anomaly that needs Serializable
@@ -814,28 +864,46 @@ Pessimistic locking is correct when contention is high and a conflict is likely 
 alter table tasks add column version integer not null default 1;
 \`\`\`
 
-\`\`\`ts
-export async function updateTask(id: string, expectedVersion: number, patch: Patch) {
-  const { rows, rowCount } = await pool.query(
-    \`update tasks
-        set title = coalesce($3, title),
-            status = coalesce($4, status),
-            version = version + 1,
-            updated_at = now()
-      where id = $1 and version = $2
-      returning *\`,
-    [id, expectedVersion, patch.title ?? null, patch.status ?? null],
-  );
+\`\`\`python
+from uuid import UUID
 
-  if (rowCount === 0) {
-    // Either the row is gone, or someone else wrote it first.
-    const exists = await pool.query("select 1 from tasks where id = $1", [id]);
-    throw exists.rowCount
-      ? new ConflictError("This task was modified by someone else. Reload and retry.")
-      : new NotFoundError("Task not found.");
-  }
-  return rows[0];
-}
+import asyncpg
+from pydantic import BaseModel
+
+
+class TaskPatch(BaseModel):
+    title: str | None = None
+    status: str | None = None
+
+
+async def update_task(
+    pool: asyncpg.Pool, task_id: UUID, expected_version: int, patch: TaskPatch
+) -> asyncpg.Record:
+    row = await pool.fetchrow(
+        """
+        update tasks
+           set title = coalesce($3, title),
+               status = coalesce($4, status),
+               version = version + 1,
+               updated_at = now()
+         where id = $1 and version = $2
+        returning *
+        """,
+        task_id,
+        expected_version,
+        patch.title,
+        patch.status,
+    )
+
+    if row is None:
+        # Zero rows updated: either the row is gone, or someone else wrote it first.
+        exists = await pool.fetchval("select 1 from tasks where id = $1", task_id)
+        if exists:
+            raise ConflictError(
+                "This task was modified by someone else. Reload and retry."
+            )
+        raise NotFoundError("Task not found.")
+    return row
 \`\`\`
 
 No lock is ever held; the \`where version = $2\` predicate is the check, and it's atomic because a single \`UPDATE\` statement is. This maps directly onto HTTP: return \`ETag: "v7"\`, require \`If-Match\`, and answer a mismatch with \`412 Precondition Failed\`.
@@ -878,24 +946,42 @@ Also know the **lock hierarchy**: row locks are what application code usually hi
 
 Opening a connection means a TCP handshake, TLS negotiation, authentication, and process fork — single-digit milliseconds. Doing that per HTTP request is unacceptable, so you pool.
 
-\`\`\`ts
-import { Pool } from "pg";
+\`\`\`python
+import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
-export const pool = new Pool({
-  connectionString: env.DATABASE_URL,
-  max: 10,                        // per Node process
-  min: 0,
-  idleTimeoutMillis: 30_000,      // return idle connections to the OS
-  connectionTimeoutMillis: 5_000, // fail fast rather than hang when saturated
-  statement_timeout: 10_000,      // kill runaway queries server-side
-});
+import asyncpg
+from fastapi import FastAPI
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    app.state.pool = await asyncpg.create_pool(
+        dsn=os.environ["DATABASE_URL"],
+        min_size=0,
+        max_size=10,                              # per worker process
+        timeout=5.0,                              # fail fast rather than hang
+        max_inactive_connection_lifetime=30.0,    # return idle connections to the OS
+        command_timeout=10.0,                     # give up on a slow query client-side
+        server_settings={"statement_timeout": "10000"},  # and kill it server-side
+    )
+    try:
+        yield
+    finally:
+        await app.state.pool.close()
+
+
+app = FastAPI(lifespan=lifespan)
 \`\`\`
+
+The SQLAlchemy equivalent is \`create_async_engine(url, pool_size=10, max_overflow=0, pool_timeout=5, pool_recycle=1800)\` — note that SQLAlchemy's ceiling is \`pool_size + max_overflow\`, so leaving \`max_overflow\` at its default of 10 quietly doubles the number you thought you configured.
 
 ### Sizing
 
-The arithmetic is what people miss: **total connections = app instances × pool \`max\`**, plus anything else touching the database — background workers, cron jobs, migration runners, your psql session, the BI tool. Ten instances at \`max: 20\` is 200 connections against a default limit of 100, and the failure is \`FATAL: sorry, too many clients already\` at exactly the moment traffic spikes.
+The arithmetic is what people miss: **total connections = worker processes × pool \`max_size\`**, plus anything else touching the database — Celery or ARQ workers, cron jobs, Alembic migration runs, your psql session, the BI tool. Note that the multiplier is *processes*, not instances: \`uvicorn --workers 4\` on five machines is twenty pools, and each one is separate, because a pool cannot be shared across a fork. Twenty pools at \`max_size=20\` is 400 connections against a default limit of 100, and the failure is \`FATAL: sorry, too many clients already\` at exactly the moment traffic spikes.
 
-Counter-intuitively, **smaller pools are often faster.** A common starting point is \`(cores × 2) + effective_spindles\`; for a modern 4-core Postgres box that's around 10. Beyond the point where the database is saturated, extra connections don't add throughput — they add queueing *inside* the database, where you can't see it, instead of queueing in your pool, where you can.
+Counter-intuitively, **smaller pools are often faster.** A common starting point is \`(cores × 2) + effective_spindles\`; for a modern 4-core Postgres box that's around 10 *in total*, so divide by your worker count. Beyond the point where the database is saturated, extra connections don't add throughput — they add queueing *inside* the database, where you can't see it, instead of queueing in your pool, where you can.
 
 ### PgBouncer
 
@@ -907,7 +993,7 @@ When you genuinely need hundreds of app processes (or serverless functions, wher
 | **Transaction** | A server connection is assigned per transaction | The usual choice. **Breaks session state**: prepared statements, \`SET\`, advisory locks, \`LISTEN/NOTIFY\` |
 | **Statement** | Per statement | Multi-statement transactions are impossible |
 
-Transaction mode is why serverless Postgres setups need \`prepare: false\` or a driver that doesn't rely on named prepared statements — a detail worth mentioning if you've deployed to a serverless platform.
+Transaction mode is why asyncpg needs \`statement_cache_size=0\` behind PgBouncer (it prepares every query by name, and the name is bound to a server connection you no longer own on the next statement), and why SQLAlchemy's asyncpg dialect exposes \`prepared_statement_cache_size=0\` for the same reason. Getting this wrong produces the memorable error \`prepared statement "__asyncpg_stmt_1__" already exists\` under load and never in development.
 
 ### Diagnosing pool exhaustion
 
@@ -928,7 +1014,7 @@ select pid, now() - xact_start as duration, state, left(query, 60) as query
  order by duration desc;
 \`\`\`
 
-\`idle in transaction\` is the smoking gun. It means code called \`BEGIN\`, then did something slow or threw, and never committed or rolled back — usually an HTTP call inside a transaction, or a missing \`finally { client.release() }\`. Set \`idle_in_transaction_session_timeout\` so the database kills those rather than letting them accumulate.
+\`idle in transaction\` is the smoking gun. It means code called \`BEGIN\`, then did something slow or threw, and never committed or rolled back — usually an HTTP call inside a transaction, or a connection acquired outside \`async with\` and dropped on an exception path. Set \`idle_in_transaction_session_timeout\` so the database kills those rather than letting them accumulate.
 
 The three rules: acquire the connection as late as possible, release it in a \`finally\`, and never hold one across a network call to anything else.`,
     },
@@ -1300,7 +1386,7 @@ Worth adding out loud: report the median and p95 rather than the mean for anythi
     },
     {
       q: "Optimistic or pessimistic locking?",
-      a: "It depends on how likely a conflict is. Pessimistic — `select ... for update` inside a transaction — takes the lock before reading, so nobody else can touch the row until you commit. That's right when contention is high and a conflict is likely: decrementing inventory in a flash sale, booking a seat. The cost is that lock waits serialize throughput and long-held locks create queues and deadlock risk. Optimistic adds a `version` column and writes with `where id = $1 and version = $2`, incrementing it; if `rowCount` is 0, someone else won and you return a 409 telling the client to reload. No lock is ever held, and the check is atomic because a single UPDATE is. That's right when conflicts are rare, which covers most CRUD — two people editing the same document at the same second is unusual. It also maps straight onto HTTP: serve `ETag`, require `If-Match`, answer a mismatch with 412. And it works across services without a shared transaction, since it's just a column. My default is optimistic, switching to pessimistic when I measure real contention.",
+      a: "It depends on how likely a conflict is. Pessimistic — `select ... for update` inside a transaction — takes the lock before reading, so nobody else can touch the row until you commit. That's right when contention is high and a conflict is likely: decrementing inventory in a flash sale, booking a seat. The cost is that lock waits serialize throughput and long-held locks create queues and deadlock risk. Optimistic adds a `version` column and writes with `where id = $1 and version = $2`, incrementing it; if the update affects zero rows — `RETURNING` gives back nothing — someone else won and you return a 409 telling the client to reload. No lock is ever held, and the check is atomic because a single UPDATE is. That's right when conflicts are rare, which covers most CRUD — two people editing the same document at the same second is unusual. It also maps straight onto HTTP: serve `ETag`, require `If-Match`, answer a mismatch with 412. And it works across services without a shared transaction, since it's just a column. My default is optimistic, switching to pessimistic when I measure real contention.",
       weak: "Pessimistic locking is safer because it locks the row, so I'd use SELECT FOR UPDATE to be sure nothing gets overwritten.",
     },
     {
@@ -1309,7 +1395,7 @@ Worth adding out loud: report the median and p95 rather than the mean for anythi
     },
     {
       q: "Why do you need a connection pool, and how do you size it?",
-      a: "Each Postgres connection is a separate OS process with several MB of its own memory, and opening one costs a TCP handshake, TLS, auth, and a fork — single-digit milliseconds, which is unacceptable per request. A pool keeps N connections warm and hands them out. Sizing is arithmetic people skip: total connections is app instances times pool max, plus background workers, cron jobs, migration runners, the BI tool, and your psql session. Ten instances at max 20 is 200 against a default `max_connections` of 100, and it fails with 'too many clients' exactly when traffic spikes. Counter-intuitively smaller pools are often faster — roughly cores × 2 as a starting point — because past the point where the database is saturated, extra connections just move the queue *inside* the database where you can't observe it. Past a few hundred processes the server gets slower, not faster. For hundreds of app processes or serverless, PgBouncer in transaction mode multiplexes many clients onto few server connections, at the cost of breaking session state — prepared statements, SET, advisory locks. And the symptom of exhaustion is deceptive: every endpoint gets slow including ones that don't touch the database, because requests queue for a connection while the database sits idle.",
+      a: "Each Postgres connection is a separate OS process with several MB of its own memory, and opening one costs a TCP handshake, TLS, auth, and a fork — single-digit milliseconds, which is unacceptable per request. A pool keeps N connections warm and hands them out. Sizing is arithmetic people skip: total connections is worker *processes* times pool max_size — not instances, since a pool can't be shared across a fork, so `uvicorn --workers 4` on five machines is twenty pools — plus background workers, cron jobs, migration runners, the BI tool, and your psql session. Twenty pools at max_size 20 is 400 against a default `max_connections` of 100, and it fails with 'too many clients' exactly when traffic spikes. Counter-intuitively smaller pools are often faster — roughly cores × 2 as a starting point — because past the point where the database is saturated, extra connections just move the queue *inside* the database where you can't observe it. Past a few hundred processes the server gets slower, not faster. For hundreds of app processes or serverless, PgBouncer in transaction mode multiplexes many clients onto few server connections, at the cost of breaking session state — prepared statements, SET, advisory locks. And the symptom of exhaustion is deceptive: every endpoint gets slow including ones that don't touch the database, because requests queue for a connection while the database sits idle.",
     },
     {
       q: "You've normalized to 3NF. When would you denormalize?",

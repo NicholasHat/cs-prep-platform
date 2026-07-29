@@ -343,36 +343,71 @@ An operation is idempotent if doing it twice has the same effect as doing it onc
 
 For non-idempotent operations, use an **idempotency key**: the client generates a UUID and sends it as a header. The server stores it with the result.
 
-\`\`\`ts
-async function createCharge(key: string, req: ChargeRequest): Promise<Charge> {
-  // Claim the key atomically. If the insert conflicts, someone got here first.
-  const claimed = await db.query(
-    \`INSERT INTO idempotency_keys (key, request_hash, status)
-     VALUES ($1, $2, 'in_progress')
-     ON CONFLICT (key) DO NOTHING
-     RETURNING key\`,
-    [key, hash(req)],
-  );
+\`\`\`python
+import hashlib
+import json
+from typing import Any, Protocol
 
-  if (claimed.rowCount === 0) {
-    const prior = await db.query(
-      "SELECT request_hash, status, response FROM idempotency_keys WHERE key = $1",
-      [key],
-    );
-    const row = prior.rows[0];
-    // Same key, different body: the client has a bug. Fail loudly.
-    if (row.request_hash !== hash(req)) throw new HttpError(422, "key reused");
-    if (row.status === "in_progress") throw new HttpError(409, "in flight, retry");
-    return row.response as Charge;
-  }
+import asyncpg
+from fastapi import HTTPException
+from pydantic import BaseModel
 
-  const charge = await paymentProvider.charge(req); // the real, unsafe work
-  await db.query(
-    "UPDATE idempotency_keys SET status = 'done', response = $2 WHERE key = $1",
-    [key, charge],
-  );
-  return charge;
-}
+
+class ChargeRequest(BaseModel):
+    customer_id: str
+    amount_cents: int
+    currency: str
+
+
+class PaymentProvider(Protocol):
+    async def charge(self, req: ChargeRequest) -> dict[str, Any]: ...
+
+
+def request_digest(req: ChargeRequest) -> str:
+    # model_dump_json is stable for a given model: field order is declaration order.
+    return hashlib.sha256(req.model_dump_json().encode()).hexdigest()
+
+
+async def create_charge(
+    conn: asyncpg.Connection,
+    provider: PaymentProvider,
+    key: str,
+    req: ChargeRequest,
+) -> dict[str, Any]:
+    digest = request_digest(req)
+
+    # Claim the key atomically. If the insert conflicts, someone got here first.
+    claimed = await conn.fetchval(
+        """
+        insert into idempotency_keys (key, request_hash, status)
+        values ($1, $2, 'in_progress')
+        on conflict (key) do nothing
+        returning key
+        """,
+        key,
+        digest,
+    )
+
+    if claimed is None:
+        prior = await conn.fetchrow(
+            "select request_hash, status, response"
+            "  from idempotency_keys where key = $1",
+            key,
+        )
+        # Same key, different body: the client has a bug. Fail loudly.
+        if prior["request_hash"] != digest:
+            raise HTTPException(422, "idempotency key reused with a different body")
+        if prior["status"] == "in_progress":
+            raise HTTPException(409, "request already in flight, retry shortly")
+        return json.loads(prior["response"])
+
+    charge = await provider.charge(req)  # the real, unsafe work
+    await conn.execute(
+        "update idempotency_keys set status = 'done', response = $2 where key = $1",
+        key,
+        json.dumps(charge),
+    )
+    return charge
 \`\`\`
 
 Points that earn credit: the key is claimed *before* the side effect, the request body is hashed so a reused key with different content is rejected, concurrent duplicates get a 409 rather than a double charge, and keys expire (24h TTL) so the table doesn't grow forever.
@@ -387,22 +422,46 @@ Retrying naively turns a blip into an outage — every client retrying in lockst
 - **Circuit breaker:** after N consecutive failures, open the circuit and fail fast for a cooldown, then let a single probe through (half-open). This stops you hammering a dying dependency and gives it room to recover.
 - **Retry budgets:** allow retries to be at most ~10% of total requests. Under a broad outage, retries stop amplifying.
 
-\`\`\`ts
-async function withRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
-  let lastErr: unknown;
-  for (let i = 0; i < attempts; i++) {
-    try {
-      return await fn();
-    } catch (err) {
-      if (!isRetryable(err) || i === attempts - 1) throw err;
-      lastErr = err;
-      const cap = 8000;
-      const delay = Math.random() * Math.min(cap, 100 * 2 ** i);
-      await new Promise((r) => setTimeout(r, delay));
-    }
-  }
-  throw lastErr;
-}
+\`\`\`python
+import asyncio
+import random
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
+
+import httpx
+
+T = TypeVar("T")
+
+RETRYABLE_STATUS = frozenset({429, 502, 503, 504})
+
+
+def is_retryable(err: BaseException) -> bool:
+    if isinstance(err, (httpx.TimeoutException, httpx.ConnectError)):
+        return True
+    if isinstance(err, httpx.HTTPStatusError):
+        return err.response.status_code in RETRYABLE_STATUS
+    return False
+
+
+async def with_retry(
+    fn: Callable[[], Awaitable[T]],
+    attempts: int = 4,
+    base: float = 0.1,
+    cap: float = 8.0,
+) -> T:
+    for i in range(attempts):
+        try:
+            return await fn()
+        except Exception as err:
+            if not is_retryable(err) or i == attempts - 1:
+                raise
+            # Full jitter: sleep uniformly in [0, min(cap, base * 2**i)] seconds.
+            # The randomness is the important half. Without it every client that
+            # failed at the same instant retries at the same instant, and the
+            # dependency you are waiting on is hit by a thundering herd exactly
+            # as it tries to recover.
+            await asyncio.sleep(random.uniform(0, min(cap, base * 2**i)))
+    raise AssertionError("unreachable")
 \`\`\`
 
 ### Timeouts
@@ -618,19 +677,36 @@ redis.call('EXPIRE', KEYS[1], math.ceil(capacity / rate) + 60)
 return { allowed, tokens, retry_after }
 \`\`\`
 
-\`\`\`ts
-const res = (await redis.eval(TOKEN_BUCKET_LUA, {
-  keys: [\`rl:api:\${apiKey}\`],
-  arguments: [String(capacity), String(rate), String(Date.now() / 1000), "1"],
-})) as [number, number, number];
+\`\`\`python
+import time
 
-const [allowed, remaining, retryAfter] = res;
-reply.header("X-RateLimit-Limit", capacity);
-reply.header("X-RateLimit-Remaining", Math.floor(remaining));
-if (!allowed) {
-  reply.header("Retry-After", Math.ceil(retryAfter));
-  return reply.code(429).send({ error: "rate_limited" });
-}
+from fastapi import HTTPException, Response
+from redis.asyncio import Redis
+
+redis = Redis.from_url("redis://localhost:6379")
+# register_script sends EVALSHA and falls back to EVAL once, so the script body
+# crosses the wire at most once per Redis node.
+token_bucket = redis.register_script(TOKEN_BUCKET_LUA)
+
+
+async def enforce_rate_limit(
+    api_key: str, response: Response, capacity: int = 100, rate: float = 10.0
+) -> None:
+    # Redis converts the Lua numbers to integers on the way out, so these arrive
+    # already truncated — retry_after of 0 means "less than a second".
+    allowed, remaining, retry_after = await token_bucket(
+        keys=[f"rl:api:{api_key}"],
+        args=[capacity, rate, time.time(), 1],
+    )
+
+    response.headers["X-RateLimit-Limit"] = str(capacity)
+    response.headers["X-RateLimit-Remaining"] = str(remaining)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={"error": "rate_limited"},
+            headers={"Retry-After": str(max(1, retry_after))},
+        )
 \`\`\`
 
 Note the clock comes from the caller, so all limiter nodes must agree on time (NTP). Passing \`redis.call('TIME')\` instead makes the script non-deterministic for replication in older Redis — a genuinely good detail to mention.

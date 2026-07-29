@@ -447,6 +447,49 @@ data: {"msg":"threshold crossed"}
 
 \`\`\`
 
+The server side is an ordinary endpoint that returns a streaming response — here FastAPI:
+
+\`\`\`python
+import asyncio
+import json
+from collections.abc import AsyncIterator
+
+from fastapi import FastAPI, Header, Request
+from fastapi.responses import StreamingResponse
+
+app = FastAPI()
+
+
+async def event_stream(request: Request, last_event_id: int) -> AsyncIterator[str]:
+    seq = last_event_id
+    while True:
+        # The client's Last-Event-ID tells us where to resume from, so a
+        # reconnect replays only what it missed.
+        if await request.is_disconnected():
+            return
+        seq += 1
+        payload = json.dumps({"type": "price", "symbol": "AAPL", "value": 213.4})
+        yield f"id: {seq}\\ndata: {payload}\\n\\n"
+        await asyncio.sleep(1)
+
+
+@app.get("/api/stream")
+async def stream(
+    request: Request, last_event_id: int = Header(default=0)
+) -> StreamingResponse:
+    return StreamingResponse(
+        event_stream(request, last_event_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            # Tell nginx not to buffer, or nothing is delivered until the end.
+            "X-Accel-Buffering": "no",
+        },
+    )
+\`\`\`
+
+The client half has to be JavaScript — \`EventSource\` is a browser API, and the reconnection behaviour below is the browser's, not something you write:
+
 \`\`\`js
 const es = new EventSource("/api/stream");
 es.onmessage = (e) => render(JSON.parse(e.data));
@@ -542,7 +585,7 @@ Use \`defer\` for anything that touches the DOM; \`async\` only for independent 
 
 This is exactly why animations should use \`transform: translateX(...)\` rather than \`left\`, and \`opacity\` rather than \`visibility\` — they skip layout and paint and run on the GPU, holding 60 fps.
 
-**Layout thrashing** is the classic bug: writing to the DOM and then reading a layout property forces a **synchronous reflow**, and doing it in a loop makes it quadratic.
+**Layout thrashing** is the classic bug: writing to the DOM and then reading a layout property forces a **synchronous reflow**, and doing it in a loop makes it quadratic. This one is necessarily JavaScript — the bug *is* the interleaving of DOM writes and layout reads, which only exists in the browser:
 
 \`\`\`js
 // Bad: every read after a write forces a synchronous layout. O(n) forced reflows.
@@ -646,6 +689,8 @@ Untrusted input ends up executing as script in a victim's page, inside your orig
 **Stored (persistent)** — the payload is saved server-side (a comment, a profile name) and served to everyone. Worst impact.
 **Reflected** — the payload is in the URL and echoed into the response; delivered by getting a victim to click a link.
 **DOM-based** — never touches the server; client-side JS reads \`location.hash\` and writes it into the page.
+
+The sink is browser-side, so the example has to be: this is the exact line where a server-rendered escape has already been bypassed.
 
 \`\`\`js
 // Vulnerable: innerHTML parses and executes what it's given.

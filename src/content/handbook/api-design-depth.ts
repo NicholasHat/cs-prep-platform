@@ -125,7 +125,7 @@ GET /v1/tasks?q=deploy                          # free-text search
 
 Two rules that matter more than the syntax:
 
-1. **Whitelist filterable fields.** \`Object.entries(req.query)\` fed into a \`WHERE\` clause is how you end up letting clients filter on \`password_hash\` and confirm values one character at a time. Every filterable field is an explicit key in your zod schema.
+1. **Whitelist filterable fields.** Splatting \`request.query_params\` into a \`WHERE\` clause is how you end up letting clients filter on \`password_hash\` and confirm values one character at a time. Every filterable field is an explicit, typed \`Query(...)\` parameter or a field on a Pydantic model — never a loop over whatever the client sent.
 2. **Every filterable field needs an index, or a documented limit.** An unindexed \`WHERE\` on a 10M-row table is a sequential scan you just exposed to the public internet.
 
 For anything more expressive than equality, stop inventing syntax. \`?filter[price][gte]=100\` and \`?filter=price>100\` both end in a hand-written parser nobody wants to maintain. At that point you either adopt a real query language (OData, GraphQL) or accept a \`POST /v1/tasks/search\` with a structured JSON body — and say out loud you're trading cacheability for expressiveness.
@@ -139,20 +139,32 @@ GET /v1/tasks?sort=priority,-createdAt # multi-key, in order
 
 **\`ORDER BY\` cannot be parameterized.** \`order by $1\` does not work in Postgres — you cannot bind an identifier. So sort fields must come from an allowlist, mapped to real column names:
 
-\`\`\`ts
-const SORTABLE = {
-  createdAt: "created_at",
-  dueAt: "due_at",
-  priority: "priority",
-} as const;
+\`\`\`python
+from typing import Final
 
-function orderBy(sort: string): string {
-  const desc = sort.startsWith("-");
-  const key = desc ? sort.slice(1) : sort;
-  const column = SORTABLE[key as keyof typeof SORTABLE];
-  if (!column) throw new ValidationError("Unsupported sort field: " + key);
-  return column + (desc ? " desc" : " asc");
+from fastapi import HTTPException, status
+
+# Public sort name -> real column name. Anything not in here is rejected.
+SORTABLE: Final[dict[str, str]] = {
+    "createdAt": "created_at",
+    "dueAt": "due_at",
+    "priority": "priority",
 }
+
+
+def order_by(sort: str) -> str:
+    """Build a safe ORDER BY fragment from a client-supplied sort key."""
+    descending = sort.startswith("-")
+    key = sort[1:] if descending else sort
+    column = SORTABLE.get(key)
+    if column is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unsupported sort field: {key}",
+        )
+    direction = "desc" if descending else "asc"
+    # Always append a unique tiebreaker so the ordering is total.
+    return f"{column} {direction}, id {direction}"
 \`\`\`
 
 **Always add a tiebreaker.** \`order by created_at desc\` with duplicate timestamps has no defined order between ties, so a row can appear on page 1 *and* page 2 while another never appears at all. \`order by created_at desc, id desc\` makes the ordering total and the pagination correct. This is the bug that makes people think their pagination is "randomly dropping rows".`,
@@ -197,57 +209,86 @@ select * from tasks
 
 With an index on \`(created_at desc, id desc)\`, Postgres seeks straight to the position and reads 21 rows. **Page 5,000 costs the same as page 1**, and concurrent inserts cannot shift your position, because the position is a row identity rather than a count.
 
-\`\`\`ts
-// src/lib/cursor.ts
-export interface Cursor {
-  createdAt: string;
-  id: string;
-}
+\`\`\`python
+# app/routers/tasks.py
+from __future__ import annotations
 
-export function encodeCursor(c: Cursor): string {
-  return Buffer.from(JSON.stringify(c)).toString("base64url");
-}
+import base64
+import binascii
+from datetime import datetime
+from typing import Annotated
+from uuid import UUID
 
-export function decodeCursor(raw: string): Cursor {
-  try {
-    const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
-    if (typeof parsed?.createdAt !== "string" || typeof parsed?.id !== "string") {
-      throw new Error("shape");
-    }
-    return parsed;
-  } catch {
-    throw new ValidationError("Malformed cursor.");
-  }
-}
+import asyncpg
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, ConfigDict, ValidationError
 
-export async function listTasks(limit: number, cursor?: string) {
-  const values: unknown[] = [];
-  let where = "";
-  if (cursor) {
-    const { createdAt, id } = decodeCursor(cursor);
-    values.push(createdAt, id);
-    where = "where (created_at, id) < ($1, $2)";
-  }
-  values.push(limit + 1);
+router = APIRouter(prefix="/v1", tags=["tasks"])
 
-  const { rows } = await pool.query(
-    "select * from tasks " + where +
-      " order by created_at desc, id desc limit $" + values.length,
-    values,
-  );
+# The cursor is the last row's full sort key — nothing else is stable.
+_SELECT = "select id, title, created_at from tasks"
+_KEYSET = " where (created_at, id) < ($2, $3)"  # row-value comparison
+_ORDER = " order by created_at desc, id desc limit $1"
 
-  const hasMore = rows.length > limit;
-  const items = hasMore ? rows.slice(0, limit) : rows;
-  return {
-    items,
-    nextCursor: hasMore
-      ? encodeCursor({
-          createdAt: items[items.length - 1].created_at.toISOString(),
-          id: items[items.length - 1].id,
-        })
-      : null,
-  };
-}
+
+class Cursor(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    created_at: datetime
+    id: UUID
+
+
+def encode_cursor(cursor: Cursor) -> str:
+    raw = cursor.model_dump_json().encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def decode_cursor(raw: str) -> Cursor:
+    try:
+        padded = raw + "=" * (-len(raw) % 4)
+        return Cursor.model_validate_json(base64.urlsafe_b64decode(padded))
+    except (binascii.Error, ValidationError, UnicodeDecodeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Malformed cursor.",
+        ) from exc
+
+
+class Task(BaseModel):
+    id: UUID
+    title: str
+    created_at: datetime
+
+
+class TaskPage(BaseModel):
+    items: list[Task]
+    next_cursor: str | None = None
+
+
+@router.get("/tasks", response_model=TaskPage)
+async def list_tasks(
+    conn: Annotated[asyncpg.Connection, Depends(get_connection)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    cursor: str | None = None,
+) -> TaskPage:
+    # Fetch one extra row: that is how you know there is a next page without
+    # paying for a COUNT(*).
+    args: list[object] = [limit + 1]
+    sql = _SELECT + _ORDER
+    if cursor is not None:
+        after = decode_cursor(cursor)
+        sql = _SELECT + _KEYSET + _ORDER
+        args += [after.created_at, after.id]
+
+    rows = await conn.fetch(sql, *args)
+    has_more = len(rows) > limit
+    items = [Task(**dict(row)) for row in rows[:limit]]
+
+    next_cursor = None
+    if has_more and items:
+        last = items[-1]
+        next_cursor = encode_cursor(Cursor(created_at=last.created_at, id=last.id))
+    return TaskPage(items=items, next_cursor=next_cursor)
 \`\`\`
 
 **Base64-encode the cursor** — not for security (it is trivially decodable), but to make it opaque so clients treat it as a token rather than parsing it and coupling themselves to your sort key. If it *must* be tamper-proof, sign it with HMAC.
@@ -314,14 +355,66 @@ Instrument per-version request counts by client so you know who is affected befo
 
 ### Session cookies
 
-\`\`\`ts
-res.cookie("sid", sessionId, {
-  httpOnly: true,   // JavaScript cannot read it -> XSS can't steal it directly
-  secure: true,     // HTTPS only
-  sameSite: "lax",  // not sent on cross-site POSTs -> blocks most CSRF
-  maxAge: 1000 * 60 * 60 * 24 * 7,
-  path: "/",
-});
+\`\`\`python
+# app/routers/sessions.py
+import secrets
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi.concurrency import run_in_threadpool
+from passlib.context import CryptContext
+from pydantic import BaseModel, EmailStr, SecretStr
+
+router = APIRouter(prefix="/v1", tags=["auth"])
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+SESSION_TTL_SECONDS = 60 * 60 * 24 * 7
+
+# Verified against when the account does not exist, so a missing user costs the
+# same as a wrong password. Without it, login is a user-enumeration oracle.
+_DUMMY_HASH = pwd_context.hash("this-never-matches")
+
+
+class LoginBody(BaseModel):
+    email: EmailStr
+    password: SecretStr
+
+
+@router.post("/sessions", status_code=status.HTTP_201_CREATED)
+async def log_in(
+    body: LoginBody,
+    response: Response,
+    users: Annotated[UserRepository, Depends(get_user_repository)],
+    sessions: Annotated[SessionStore, Depends(get_session_store)],
+) -> dict[str, str]:
+    user = await users.find_by_email(body.email)
+    # bcrypt is deliberately slow (~100ms) and CPU-bound, so calling it inline
+    # would block the whole event loop for every concurrent request.
+    ok = await run_in_threadpool(
+        pwd_context.verify,
+        body.password.get_secret_value(),
+        user.password_hash if user else _DUMMY_HASH,
+    )
+    if user is None or not ok:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials.",
+            headers={"WWW-Authenticate": 'Cookie realm="acme"'},
+        )
+
+    session_id = secrets.token_urlsafe(32)
+    await sessions.create(session_id, user_id=user.id, ttl=SESSION_TTL_SECONDS)
+
+    response.set_cookie(
+        key="sid",
+        value=session_id,
+        httponly=True,   # JavaScript cannot read it -> XSS can't steal it directly
+        secure=True,     # HTTPS only
+        samesite="lax",  # not sent on cross-site POSTs -> blocks most CSRF
+        max_age=SESSION_TTL_SECONDS,
+        path="/",
+    )
+    return {"status": "ok"}
 \`\`\`
 
 The server keeps \`sessionId → {userId, expiresAt}\` in Redis or Postgres. Logging out, or banning a user, is a single \`DELETE\` and takes effect on the very next request. That instant revocation is the reason sessions remain the right default for first-party web apps despite being "stateless-unfriendly".
@@ -345,16 +438,47 @@ Now the parts candidates miss, which is exactly what the follow-up question is f
 4. **\`alg: none\` and algorithm confusion.** Historic libraries accepted \`{"alg":"none"}\` and skipped verification, or let an attacker sign an RS256 token with the *public* key treated as an HMAC secret. Always pin the expected algorithm in the verify call; never trust the header.
 5. **Browser storage has no good answer.** \`localStorage\` is readable by any XSS. A cookie is safer (\`HttpOnly\`) but then you're back to CSRF — and if you're using cookies anyway, ask why you needed a JWT rather than a session.
 
-\`\`\`ts
-import jwt from "jsonwebtoken";
+\`\`\`python
+# app/security/jwt.py
+from typing import Annotated, Any
 
-const payload = jwt.verify(token, PUBLIC_KEY, {
-  algorithms: ["RS256"],           // pin it — never read alg from the header
-  issuer: "https://auth.acme.com",
-  audience: "https://api.acme.com",
-  clockTolerance: 5,
-});
+import jwt  # PyJWT
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+bearer_scheme = HTTPBearer(auto_error=False)
+
+
+async def current_claims(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> dict[str, Any]:
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing bearer token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    try:
+        return jwt.decode(
+            credentials.credentials,
+            PUBLIC_KEY,
+            algorithms=["RS256"],            # pin it — never read alg from the header
+            issuer="https://auth.acme.com",
+            audience="https://api.acme.com",
+            leeway=5,                        # seconds of tolerated clock skew
+            options={"require": ["exp", "iat", "iss", "aud", "sub"]},
+        )
+    except jwt.PyJWTError as exc:
+        # ExpiredSignatureError, InvalidAudienceError, InvalidSignatureError and
+        # friends all land here. Never report which one to the caller.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
 \`\`\`
+
+Two things this code does that are easy to get wrong. \`algorithms=["RS256"]\` is an allowlist, not a hint: PyJWT will refuse a token whose header says \`none\` or \`HS256\`, which is what closes the algorithm-confusion hole. And \`options={"require": [...]}\` makes the claims mandatory — without it, a token with no \`exp\` verifies happily and never expires.
 
 **The rule of thumb worth stating:** first-party web app → session cookies. Mobile or service-to-service → short-lived JWT access token + refresh token, with refresh tokens stored server-side so they *can* be revoked. Third-party integrations → API keys with scopes, or OAuth2 if a user is delegating access to their data.
 
@@ -370,38 +494,67 @@ Authorization Code + PKCE: your app redirects the user to the provider, the user
 
 **RBAC** — permissions attach to roles, roles attach to users.
 
-\`\`\`ts
-const PERMISSIONS = {
-  viewer: ["task:read"],
-  member: ["task:read", "task:create", "task:update"],
-  admin: ["task:read", "task:create", "task:update", "task:delete", "project:manage"],
-} as const;
+\`\`\`python
+# app/authz/rbac.py
+from collections.abc import Awaitable, Callable
+from typing import Annotated, Final
+from uuid import UUID
 
-function requirePermission(permission: string) {
-  return (req: Request, _res: Response, next: NextFunction) => {
-    const perms = PERMISSIONS[req.user.role] ?? [];
-    if (!perms.includes(permission)) throw new ForbiddenError();
-    next();
-  };
+from fastapi import Depends, HTTPException, status
+
+PERMISSIONS: Final[dict[str, frozenset[str]]] = {
+    "viewer": frozenset({"task:read"}),
+    "member": frozenset({"task:read", "task:create", "task:update"}),
+    "admin": frozenset(
+        {"task:read", "task:create", "task:update", "task:delete", "project:manage"}
+    ),
 }
+
+
+def require_permission(permission: str) -> Callable[..., Awaitable[User]]:
+    """Dependency factory for a coarse, route-level role gate."""
+
+    async def dependency(user: Annotated[User, Depends(current_user)]) -> User:
+        if permission not in PERMISSIONS.get(user.role, frozenset()):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions.",
+            )
+        return user
+
+    return dependency
+
+
+@router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_task(
+    task_id: UUID,
+    user: Annotated[User, Depends(require_permission("task:delete"))],
+    service: Annotated[TaskService, Depends(get_task_service)],
+) -> None:
+    # The dependency proved this user may delete SOME task. The service still
+    # has to prove they may delete THIS one.
+    await service.delete_task(task_id, actor=user)
 \`\`\`
 
 Simple, auditable, and enough for most products. It breaks down when rules depend on the *relationship* between the user and the specific object — "a member may edit a task **only in a project they belong to**, and only **before it's archived**". Role alone cannot express that.
 
 **ABAC** — decide from attributes of subject, resource, action, and environment:
 
-\`\`\`ts
-function canEditTask(user: User, task: Task, project: Project): boolean {
-  if (user.role === "admin") return true;
-  if (!project.memberIds.includes(user.id)) return false;
-  if (project.archivedAt) return false;
-  return task.createdBy === user.id || user.role === "member";
-}
+\`\`\`python
+# app/authz/abac.py
+def can_edit_task(user: User, task: Task, project: Project) -> bool:
+    if user.role == "admin":
+        return True
+    if user.id not in project.member_ids:
+        return False
+    if project.archived_at is not None:
+        return False
+    return task.created_by == user.id or user.role == "member"
 \`\`\`
 
 More expressive, harder to audit ("who can edit task 42?" now requires evaluating a function against live data).
 
-**The non-negotiable part**, and the thing interviewers are really checking: authorization is enforced **per object**, in the service layer, not by a route-level role check. \`requirePermission("task:update")\` confirms members may update *some* task; it says nothing about *this* task. If you only check the role, any member can \`PATCH /tasks/{any-id}\` and edit another company's data. That is IDOR — broken object-level authorization — and it is consistently the number one item on the OWASP API Security Top 10.`,
+**The non-negotiable part**, and the thing interviewers are really checking: authorization is enforced **per object**, in the service layer, not by a route-level role check. \`Depends(require_permission("task:update"))\` confirms members may update *some* task; it says nothing about *this* task. If you only check the role, any member can \`PATCH /tasks/{any-id}\` and edit another company's data. That is IDOR — broken object-level authorization — and it is consistently the number one item on the OWASP API Security Top 10.`,
     },
     {
       id: "rate-limiting",
@@ -420,11 +573,8 @@ More expressive, harder to audit ("who can edit task 42?" now requires evaluatin
 
 **Token bucket is the answer to give**, because it separates two things the others conflate: the sustained rate (refill) and the tolerated burst (capacity). A user who has been idle accumulates tokens and can spend them in one burst — which is what real clients do when a page loads and fires eight requests at once.
 
-\`\`\`ts
-// src/lib/rateLimit.ts — token bucket in Redis, atomic via Lua.
-import type Redis from "ioredis";
-
-const SCRIPT = \`
+\`\`\`lua
+-- app/redis/token_bucket.lua — the whole read-modify-write, run atomically.
 local key      = KEYS[1]
 local rate     = tonumber(ARGV[1])   -- tokens per second
 local capacity = tonumber(ARGV[2])
@@ -457,64 +607,114 @@ if allowed == 0 then
   retry_after = (cost - tokens) / rate
 end
 return { allowed, tokens, retry_after }
-\`;
-
-export interface RateLimitResult {
-  allowed: boolean;
-  remaining: number;
-  retryAfterSeconds: number;
-}
-
-export async function consume(
-  redis: Redis,
-  key: string,
-  ratePerSecond: number,
-  capacity: number,
-  cost = 1,
-): Promise<RateLimitResult> {
-  const [allowed, tokens, retryAfter] = (await redis.eval(
-    SCRIPT,
-    1,
-    key,
-    String(ratePerSecond),
-    String(capacity),
-    String(Date.now() / 1000),
-    String(cost),
-  )) as [number, number, number];
-
-  return {
-    allowed: allowed === 1,
-    remaining: Math.floor(tokens),
-    retryAfterSeconds: Math.ceil(retryAfter),
-  };
-}
 \`\`\`
 
-\`\`\`ts
-// src/middleware/rateLimit.ts
-export function rateLimit(ratePerSecond: number, capacity: number) {
-  return async (req: Request, res: Response, next: NextFunction) => {
-    // Key by user when authenticated; by IP otherwise. Never key an
-    // authenticated API purely by IP — one corporate NAT shares an IP.
-    const key = "rl:" + (req.user?.id ?? req.ip);
-    const result = await consume(redis, key, ratePerSecond, capacity);
+\`\`\`python
+# app/rate_limit.py — the Python side of the token bucket.
+from __future__ import annotations
 
-    res.setHeader("RateLimit-Limit", capacity);
-    res.setHeader("RateLimit-Remaining", result.remaining);
+import math
+import time
+from dataclasses import dataclass
+from pathlib import Path
 
-    if (!result.allowed) {
-      res.setHeader("Retry-After", result.retryAfterSeconds);
-      res.status(429).json({
-        error: {
-          code: "rate_limited",
-          message: "Too many requests. Retry in " + result.retryAfterSeconds + "s.",
-        },
-      });
-      return;
-    }
-    next();
-  };
-}
+from redis.asyncio import Redis
+from redis.commands.core import AsyncScript
+
+_LUA = (Path(__file__).parent / "redis" / "token_bucket.lua").read_text()
+
+
+@dataclass(frozen=True, slots=True)
+class RateLimitResult:
+    allowed: bool
+    remaining: int
+    retry_after_seconds: int
+
+
+class TokenBucket:
+    """One instance per process. The buckets themselves live in Redis, which is
+    what makes the limit correct across every replica behind the load balancer.
+    """
+
+    def __init__(self, redis: Redis) -> None:
+        # register_script sends the body once and then calls EVALSHA, falling
+        # back to EVAL automatically if Redis has evicted the script.
+        self._script: AsyncScript = redis.register_script(_LUA)
+
+    async def consume(
+        self,
+        key: str,
+        rate_per_second: float,
+        capacity: int,
+        cost: int = 1,
+    ) -> RateLimitResult:
+        allowed, tokens, retry_after = await self._script(
+            keys=[key],
+            args=[rate_per_second, capacity, time.time(), cost],
+        )
+        # Redis truncates Lua numbers to integers on the way out, so a
+        # retry_after of 0.4s arrives as 0. Round up, and never advertise 0.
+        seconds = math.ceil(float(retry_after))
+        return RateLimitResult(
+            allowed=bool(allowed),
+            remaining=math.floor(float(tokens)),
+            retry_after_seconds=seconds if allowed else max(seconds, 1),
+        )
+\`\`\`
+
+\`\`\`python
+# app/dependencies/rate_limit.py
+from collections.abc import Awaitable, Callable
+from typing import Annotated
+
+from fastapi import Depends, HTTPException, Request, Response, status
+
+
+def rate_limit(rate_per_second: float, capacity: int) -> Callable[..., Awaitable[None]]:
+    """Dependency factory so each route can carry its own budget."""
+
+    async def dependency(
+        request: Request,
+        response: Response,
+        user: Annotated[User | None, Depends(optional_user)],
+    ) -> None:
+        # Key by user when authenticated; by IP otherwise. Never key an
+        # authenticated API purely by IP — one corporate NAT shares an IP.
+        identity = str(user.id) if user else request.client.host
+        bucket: TokenBucket = request.app.state.rate_limiter
+        result = await bucket.consume(f"rl:{identity}", rate_per_second, capacity)
+
+        headers = {
+            "RateLimit-Limit": str(capacity),
+            "RateLimit-Remaining": str(result.remaining),
+        }
+        response.headers.update(headers)
+
+        if not result.allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "code": "rate_limited",
+                    "message": (
+                        f"Too many requests. "
+                        f"Retry in {result.retry_after_seconds}s."
+                    ),
+                },
+                # HTTPException bypasses the Response above, so repeat them here.
+                headers={**headers, "Retry-After": str(result.retry_after_seconds)},
+            )
+
+    return dependency
+
+
+# Auth endpoints get a far tighter bucket than reads: 1 request every 5s,
+# bursting to 5. That is the credential-stuffing defence.
+@router.post(
+    "/sessions",
+    dependencies=[Depends(rate_limit(rate_per_second=0.2, capacity=5))],
+)
+async def log_in(body: LoginBody) -> dict[str, str]:
+    ...
 \`\`\`
 
 ### Details that separate a real answer from a textbook one
@@ -581,23 +781,71 @@ Cache-Control: private, max-age=0, must-revalidate
 
 The client already has the bytes, so the \`304\` sends none. On a mobile network that is the difference between 412 bytes and ~120 bytes of headers, and no JSON parse.
 
-\`\`\`ts
-import { createHash } from "node:crypto";
+\`\`\`python
+# app/routers/tasks.py
+import hashlib
+import json
+from typing import Annotated
+from uuid import UUID
 
-app.get("/v1/tasks/:id", async (req, res) => {
-  const task = await taskService.getTask(req.params.id);
-  const body = JSON.stringify({ data: task });
-  const etag = '"' + createHash("sha1").update(body).digest("base64url") + '"';
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 
-  res.setHeader("ETag", etag);
-  res.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
+router = APIRouter(prefix="/v1", tags=["tasks"])
+CACHE_CONTROL = "private, max-age=0, must-revalidate"
 
-  if (req.header("if-none-match") === etag) {
-    res.status(304).end();       // MUST have no body
-    return;
-  }
-  res.type("application/json").send(body);
-});
+
+def etag_for(payload: dict[str, object]) -> tuple[str, bytes]:
+    # sort_keys + fixed separators make the serialisation byte-stable. Without
+    # that the hash changes on every request and you never see a 304.
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return '"' + hashlib.sha256(body).hexdigest()[:32] + '"', body
+
+
+@router.get("/tasks/{task_id}")
+async def get_task(
+    task_id: UUID,
+    service: Annotated[TaskService, Depends(get_task_service)],
+    if_none_match: Annotated[str | None, Header()] = None,
+) -> Response:
+    task = await service.get_task(task_id)
+    etag, body = etag_for({"data": task.model_dump(mode="json")})
+    headers = {"ETag": etag, "Cache-Control": CACHE_CONTROL}
+
+    if if_none_match == etag:
+        # A 304 MUST carry no body — only the validators.
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+
+    return Response(content=body, media_type="application/json", headers=headers)
+
+
+@router.patch("/tasks/{task_id}")
+async def update_task(
+    task_id: UUID,
+    patch: TaskPatch,
+    service: Annotated[TaskService, Depends(get_task_service)],
+    if_match: Annotated[str | None, Header()] = None,
+) -> Response:
+    if if_match is None:
+        raise HTTPException(
+            status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+            detail="If-Match is required for updates.",
+        )
+
+    # update ... where id = $1 and version = $2; zero rows means someone else
+    # wrote first, so the client's base version is stale.
+    updated = await service.update_if_unchanged(task_id, patch, expected_etag=if_match)
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_412_PRECONDITION_FAILED,
+            detail="The resource has changed since you last read it.",
+        )
+
+    etag, body = etag_for({"data": updated.model_dump(mode="json")})
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={"ETag": etag, "Cache-Control": CACHE_CONTROL},
+    )
 \`\`\`
 
 Note what this does and doesn't save: the database query still ran. To save the query too, derive the ETag from something cheap — a \`version\` column or \`updated_at\` — and check it before fetching the full row.
@@ -617,7 +865,7 @@ If-Match: "a3f1c9e7"
 HTTP/1.1 412 Precondition Failed
 \`\`\`
 
-Server-side that's \`update tasks set … where id = $1 and version = $2\`; if \`rowCount === 0\`, the row moved on and you return \`412\` (or \`409\`). This is a strong thing to volunteer — most candidates only know ETags as a bandwidth optimisation.
+Server-side that's \`update tasks set … where id = $1 and version = $2 returning *\`; if \`fetchrow\` comes back \`None\`, the row moved on and you return \`412\` (or \`409\`). This is a strong thing to volunteer — most candidates only know ETags as a bandwidth optimisation.
 
 ### Where caches live
 
@@ -672,30 +920,38 @@ Only then does the browser send the actual \`POST\`, which must *also* carry \`A
 
 **Why the browser does this:** it protects servers written before CORS existed. A cross-origin \`DELETE\` that reached such a server would have already done damage by the time the browser decided not to show the response. Preflight asks permission *before* the state-changing request is sent.
 
-\`\`\`ts
-import cors from "cors";
+\`\`\`python
+# app/main.py
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      // No Origin header = not a browser (curl, server-to-server). Allow.
-      if (!origin) return callback(null, true);
-      callback(null, env.CORS_ORIGINS.includes(origin));
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PATCH", "PUT", "DELETE"],
-    allowedHeaders: ["Content-Type", "Authorization", "Idempotency-Key"],
-    exposedHeaders: ["X-Request-Id", "RateLimit-Remaining"],
-    maxAge: 86_400,
-  }),
-);
+app = FastAPI()
+
+# add_middleware prepends, so the LAST middleware added is the outermost one.
+# Add CORS last: it must wrap authentication, because it answers the preflight
+# OPTIONS itself and that request deliberately carries no Authorization header.
+app.add_middleware(AuthenticationMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    # An explicit allowlist. allow_origins=["*"] cannot be combined with
+    # allow_credentials=True — the spec forbids it and browsers reject it.
+    allow_origins=settings.cors_origins,  # ["https://app.acme.com"]
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
+    allow_headers=["Content-Type", "Authorization", "Idempotency-Key"],
+    # Without this, JavaScript cannot read these response headers at all.
+    expose_headers=["X-Request-Id", "RateLimit-Remaining"],
+    max_age=86_400,
+)
 \`\`\`
+
+Starlette's \`CORSMiddleware\` sets \`Vary: Origin\` and echoes only allowlisted origins for you, and it short-circuits the preflight before any route or dependency runs — which is exactly the ordering you want.
 
 ### The traps
 
 - **\`Access-Control-Allow-Origin: *\` cannot be combined with \`credentials: true\`.** The spec forbids it, and browsers reject it. With credentials you must echo a specific, allowlisted origin — and set \`Vary: Origin\` so a cache doesn't serve one origin's allow header to another.
-- **Echoing \`Origin\` blindly is \`*\` with extra steps.** \`res.setHeader("Access-Control-Allow-Origin", req.headers.origin)\` allows every site on the internet. Check against an allowlist.
-- **CORS must run before auth.** Preflight \`OPTIONS\` carries no \`Authorization\` header by design. If auth middleware runs first and 401s the \`OPTIONS\`, the browser never sends the real request and the developer sees a confusing "CORS error" that is actually an ordering bug.
+- **Echoing \`Origin\` blindly is \`*\` with extra steps.** \`allow_origin_regex=".*"\`, or hand-rolling \`response.headers["Access-Control-Allow-Origin"] = request.headers["origin"]\`, allows every site on the internet. Check against an allowlist.
+- **CORS must run before auth.** Preflight \`OPTIONS\` carries no \`Authorization\` header by design. If your auth middleware or an \`APIRouter\`-level \`Depends\` runs first and 401s the \`OPTIONS\`, the browser never sends the real request and the developer sees a confusing "CORS error" that is actually an ordering bug.
 - **Response headers are invisible to JS unless exposed.** Only a handful are readable by default. If clients need \`X-Request-Id\` or a pagination header, list it in \`Access-Control-Expose-Headers\`.
 - **A "CORS error" in the console is usually not a CORS bug.** If the server 500s, the error response often lacks CORS headers, so the browser reports a CORS failure and hides the real one. Check the network tab's status code, and reproduce with \`curl\`.
 - **CORS ≠ CSRF protection.** CORS governs *reading responses*; the request is often still sent. Use \`SameSite\` cookies and CSRF tokens for state-changing requests.`,
@@ -707,72 +963,132 @@ app.use(
 
 ### SQL injection
 
-\`\`\`ts
-// Vulnerable. Input "'; drop table users; --" ends the string and adds a statement.
-const { rows } = await pool.query(
-  "select * from users where email = '" + email + "'",
-);
+\`\`\`python
+import asyncpg
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
-// Safe. Driver sends SQL and values on separate channels; the value is never parsed as SQL.
-const { rows } = await pool.query(
-  "select * from users where email = $1",
-  [email],
-);
+
+async def find_by_email_WRONG(
+    conn: asyncpg.Connection, email: str
+) -> list[asyncpg.Record]:
+    # NEVER DO THIS. Input "'; drop table users; --" closes the string literal
+    # and appends a second statement. An f-string is a string builder, not an
+    # escaping mechanism — it has no idea it is producing SQL.
+    return await conn.fetch(f"select * from users where email = '{email}'")
+
+
+async def find_by_email(conn: asyncpg.Connection, email: str) -> list[asyncpg.Record]:
+    # Safe: asyncpg sends the SQL and the values over separate protocol fields,
+    # so the value is never parsed as SQL, whatever it contains.
+    return await conn.fetch("select * from users where email = $1", email)
+
+
+async def find_by_email_orm(session: AsyncSession, email: str):
+    # Safe: SQLAlchemy binds :email as a parameter. The equivalent hole here is
+    # text(f"... email = '{email}'") — the escape hatch, not the ORM itself.
+    result = await session.execute(
+        text("select * from users where email = :email"), {"email": email}
+    )
+    return result.fetchall()
 \`\`\`
 
 The subtleties that show you actually understand it rather than reciting "use prepared statements":
 
 - **Identifiers cannot be parameterized.** \`order by $1\` and \`from $1\` do not work — placeholders bind *values*, not table or column names. Dynamic sort columns and table names must come from an allowlist, mapped to literal strings in your code.
-- **ORMs are not automatic protection.** A tagged template like Drizzle's \`sql\` helper interpolates *parameters*, so it is safe; \`db.execute("select * from t where id = " + id)\` is not, in any library. Raw-query escape hatches exist in every ORM and that is exactly where the vulnerability lives.
+- **ORMs are not automatic protection.** SQLAlchemy's expression language builds bound parameters, so it is safe; \`session.execute(text("select * from t where id = " + id))\` is not, in any library. Raw-query escape hatches exist in every ORM and that is exactly where the vulnerability lives.
+- **\`%\` formatting and f-strings look identical but aren't.** \`cursor.execute("select … where id = %s", (task_id,))\` is a *parameterized* query in psycopg — the driver does the binding. \`cursor.execute("select … where id = %s" % task_id)\` is Python string formatting and is the vulnerability. One character apart.
 - **\`LIKE\` needs its own escaping.** User input containing \`%\` in a \`LIKE\` pattern is not injection, but it is a denial-of-service: \`%\` alone matches every row.
 
 ### The rest of the injection family
 
 | Attack | Where | Fix |
 | --- | --- | --- |
-| **XSS** | User content rendered into HTML | Contextual output encoding; React escapes by default — the hole is \`dangerouslySetInnerHTML\`. Add a Content-Security-Policy |
-| **Command injection** | \`exec("convert " + filename)\` | \`execFile\`/\`spawn\` with an argument array; never build a shell string |
-| **Path traversal** | \`readFile("./uploads/" + name)\` with \`../../etc/passwd\` | Resolve the path and assert it stays under the base directory |
-| **NoSQL injection** | \`{email: req.body.email}\` where the body sends \`{"$ne": null}\` | Validate types — a schema that requires a string rejects an object |
+| **XSS** | User content rendered into HTML | Contextual output encoding; Jinja2 with \`autoescape=True\` handles it — the hole is the \`safe\` filter and \`Markup()\`. Add a Content-Security-Policy |
+| **Command injection** | \`subprocess.run(f"convert {name}", shell=True)\` | \`subprocess.run(["convert", name])\` — an argument list, never \`shell=True\` with interpolation |
+| **Path traversal** | \`open("./uploads/" + name)\` with \`../../etc/passwd\` | Resolve the path and assert it stays under the base directory |
+| **NoSQL injection** | \`{"email": body["email"]}\` where the body sends \`{"$ne": None}\` | Validate types — a Pydantic model whose field is \`str\` rejects a dict |
 | **SSRF** | Fetching a user-supplied URL | Allowlist hosts; block private ranges (\`169.254.169.254\` is the cloud metadata endpoint) |
-| **Prototype pollution** | Deep-merging user JSON containing \`__proto__\` | Never merge untrusted objects; \`Object.create(null)\`; schema-validate first |
+| **Unsafe deserialization** | \`pickle.loads(body)\`, \`yaml.load(body)\` | \`pickle\` executes arbitrary code by design — never point it at user input. Use \`json\`, or \`yaml.safe_load\` |
+| **Template injection** | \`Template(user_string).render()\` | Never build a template *from* user input; pass it as a context variable instead |
 
-\`\`\`ts
-// Path traversal, done correctly.
-import path from "node:path";
+\`\`\`python
+# Path traversal, done correctly.
+from pathlib import Path
 
-const BASE = path.resolve("/srv/uploads");
+from fastapi import HTTPException, status
 
-function safePath(userSuppliedName: string): string {
-  const resolved = path.resolve(BASE, userSuppliedName);
-  if (resolved !== BASE && !resolved.startsWith(BASE + path.sep)) {
-    throw new ForbiddenError("Path escapes the upload directory.");
-  }
-  return resolved;
-}
+BASE = Path("/srv/uploads").resolve()
+
+
+def safe_path(user_supplied_name: str) -> Path:
+    # resolve() collapses "..", normalises separators, and follows symlinks —
+    # so the check runs on the path the filesystem will actually open.
+    candidate = (BASE / user_supplied_name).resolve()
+    # Catches "../../etc/passwd" and an absolute "/etc/passwd", which "/" would
+    # otherwise silently treat as the new root.
+    if not candidate.is_relative_to(BASE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Path escapes the upload directory.",
+        )
+    return candidate
 \`\`\`
 
 ### Validation as a security boundary
 
 Beyond types, validation limits *magnitude*, and that is what turns validation into availability protection:
 
-\`\`\`ts
-const schema = z.object({
-  title: z.string().trim().min(1).max(200),          // bounded length
-  tags: z.array(z.string().max(40)).max(20),         // bounded array
-  page: z.coerce.number().int().min(1).max(10_000),  // bounded page depth
-  limit: z.coerce.number().int().min(1).max(100),    // bounded fan-out
-});
+\`\`\`python
+from typing import Annotated
 
-app.use(express.json({ limit: "100kb" }));           // bounded body
+from fastapi import FastAPI, Query, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+app = FastAPI()
+
+Tag = Annotated[str, StringConstraints(max_length=40)]
+
+
+class CreateTask(BaseModel):
+    # extra="forbid" closes mass assignment: {"role": "admin"} is a 422, not a
+    # silently accepted column.
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    title: str = Field(min_length=1, max_length=200)     # bounded length
+    tags: list[Tag] = Field(default_factory=list, max_length=20)  # bounded array
+
+
+@app.get("/v1/tasks")
+async def list_tasks(
+    page: Annotated[int, Query(ge=1, le=10_000)] = 1,    # bounded page depth
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,     # bounded fan-out
+) -> TaskPage: ...
+
+
+MAX_BODY_BYTES = 100 * 1024
+
+
+@app.middleware("http")
+async def limit_body_size(request: Request, call_next):
+    # Starlette has no built-in body limit. Content-Length is absent under
+    # chunked encoding, so also cap it at the reverse proxy
+    # (nginx client_max_body_size) — this is defence in depth, not the fence.
+    declared = request.headers.get("content-length")
+    if declared is not None and int(declared) > MAX_BODY_BYTES:
+        return JSONResponse(
+            {"error": {"code": "payload_too_large"}}, status_code=413
+        )
+    return await call_next(request)
 \`\`\`
 
 Without bounds, one request can ask for 10 million rows, or send a 2GB body, or supply a 50,000-element array that makes you issue 50,000 queries. Those are all availability bugs, and they are all closed by a \`max()\`.
 
 Two more that get raised as follow-ups:
 
-- **Mass assignment.** \`db.insert(req.body)\` lets a client send \`{"role":"admin"}\` or \`{"accountBalance":1000000}\`. \`z.object()\` strips unknown keys by default, which closes it — but only if you insert the *parsed* object, never the raw body.
-- **ReDoS.** A regex with nested quantifiers like \`/^(a+)+$/\` against attacker input can hang the event loop for minutes. Node is single-threaded, so one such request stalls the whole process. Prefer simple patterns and bound the input length before matching.`,
+- **Mass assignment.** Passing \`await request.json()\` straight into an \`INSERT\` lets a client send \`{"role":"admin"}\` or \`{"accountBalance":1000000}\`. Pydantic ignores unknown keys by default and \`extra="forbid"\` rejects them outright — but either way you must insert the *validated model*, never the raw dict.
+- **ReDoS.** A regex with nested quantifiers like \`^(a+)+$\` against attacker input can hang for minutes. Python's \`re\` module backtracks, and a synchronous regex inside an \`async def\` handler blocks the entire event loop — every other in-flight request stalls with it. Prefer simple patterns, bound the input length before matching, and keep \`Field(pattern=...)\` regexes trivial.`,
     },
     {
       id: "webhooks-idempotency-keys",
@@ -785,64 +1101,90 @@ Everything about consuming webhooks correctly follows from one fact: **the endpo
 
 **1. Verify the signature.** The provider signs the raw body with a shared secret; you recompute and compare.
 
-\`\`\`ts
-import { createHmac, timingSafeEqual } from "node:crypto";
-import express from "express";
+\`\`\`python
+# app/routers/webhooks.py
+import hashlib
+import hmac
+import json
+import time
+from typing import Annotated
 
-// The signature covers the RAW bytes. Parsed-then-re-serialized JSON will not
-// match — key order and whitespace differ. Capture the raw body.
-app.post(
-  "/webhooks/payments",
-  express.raw({ type: "application/json", limit: "1mb" }),
-  async (req, res) => {
-    const signatureHeader = req.header("X-Signature") ?? "";
-    const timestamp = req.header("X-Timestamp") ?? "";
+import asyncpg
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
-    // Replay protection: reject anything older than 5 minutes.
-    const ageSeconds = Math.abs(Date.now() / 1000 - Number(timestamp));
-    if (!Number.isFinite(ageSeconds) || ageSeconds > 300) {
-      res.status(400).json({ error: { code: "stale_webhook" } });
-      return;
-    }
+router = APIRouter(tags=["webhooks"])
+MAX_AGE_SECONDS = 300
 
-    const expected = createHmac("sha256", env.WEBHOOK_SECRET)
-      .update(timestamp + "." + req.body.toString("utf8"))
-      .digest("hex");
 
-    const a = Buffer.from(expected, "utf8");
-    const b = Buffer.from(signatureHeader, "utf8");
-    // Length check first: timingSafeEqual throws on mismatched lengths.
-    if (a.length !== b.length || !timingSafeEqual(a, b)) {
-      res.status(401).json({ error: { code: "bad_signature" } });
-      return;
-    }
+@router.post("/webhooks/payments")
+async def receive_payment_event(
+    request: Request,
+    conn: Annotated[asyncpg.Connection, Depends(get_connection)],
+    queue: Annotated[JobQueue, Depends(get_queue)],
+    x_signature: Annotated[str, Header()] = "",
+    x_timestamp: Annotated[str, Header()] = "",
+) -> dict[str, str]:
+    # The signature covers the RAW bytes. Never let FastAPI parse this into a
+    # model first — re-serialising changes key order and whitespace, and the
+    # recomputed HMAC will not match.
+    raw = await request.body()
 
-    const event = JSON.parse(req.body.toString("utf8"));
+    # Replay protection: a signature on its own stays valid forever.
+    try:
+        age = abs(time.time() - float(x_timestamp))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail={"code": "bad_timestamp"}
+        ) from exc
+    if age > MAX_AGE_SECONDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail={"code": "stale_webhook"}
+        )
 
-    // At-least-once delivery: the same event WILL arrive twice. Dedupe on the
-    // provider's event id, with a unique constraint doing the real work.
-    const inserted = await pool.query(
-      "insert into webhook_events (id, type, payload) values ($1, $2, $3) on conflict (id) do nothing",
-      [event.id, event.type, event],
-    );
-    if (inserted.rowCount === 0) {
-      res.status(200).json({ status: "duplicate_ignored" });
-      return;
-    }
+    expected = hmac.new(
+        settings.webhook_secret.encode(),
+        f"{x_timestamp}.".encode() + raw,
+        hashlib.sha256,
+    ).hexdigest()
 
-    // Acknowledge fast, process asynchronously. Providers time out in seconds
-    // and will retry — turning a slow handler into a thundering herd.
-    await queue.enqueue("process-webhook", { eventId: event.id });
-    res.status(200).json({ status: "accepted" });
-  },
-);
+    # compare_digest exists for exactly this: its runtime does not depend on
+    # where the first differing byte is. A plain == returns early on the first
+    # mismatch and leaks how much of the signature an attacker has guessed.
+    # It also handles unequal lengths without raising.
+    if not hmac.compare_digest(expected, x_signature):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail={"code": "bad_signature"}
+        )
+
+    event = json.loads(raw)
+
+    # At-least-once delivery: the same event WILL arrive twice. Dedupe on the
+    # provider's event id, with a unique constraint doing the real work.
+    claimed = await conn.fetchval(
+        """
+        insert into webhook_events (id, type, payload)
+        values ($1, $2, $3)
+        on conflict (id) do nothing
+        returning id
+        """,
+        event["id"],
+        event["type"],
+        json.dumps(event),
+    )
+    if claimed is None:
+        return {"status": "duplicate_ignored"}
+
+    # Acknowledge fast, process asynchronously. Providers time out in seconds
+    # and will retry — turning a slow handler into a thundering herd.
+    await queue.enqueue("process-webhook", event_id=event["id"])
+    return {"status": "accepted"}
 \`\`\`
 
 The five rules, each with its reason:
 
 1. **Verify the signature** — otherwise anyone can \`POST\` "payment succeeded" and get free goods.
 2. **Include a timestamp in the signed payload** — a signature alone is replayable forever.
-3. **Use \`timingSafeEqual\`** — \`===\` on secrets leaks information through timing. It's a marginal attack over the internet, but it costs one line and interviewers look for it.
+3. **Use \`hmac.compare_digest\`** — \`==\` on a secret short-circuits at the first differing byte, so response time leaks how long a correct prefix the attacker supplied. \`compare_digest\` is in the standard library for precisely this reason, it costs no more to type than \`==\`, and it tolerates unequal lengths instead of raising. It's a marginal attack over the internet, but there is no excuse for getting it wrong in Python.
 4. **Dedupe on the event ID** — delivery is *at-least-once*, never exactly-once. Design for duplicates rather than hoping.
 5. **Return 2xx fast, process later** — most providers time out in 5-10 seconds and retry with backoff. Doing the work inline means a slow database turns one event into ten retries.
 
@@ -874,44 +1216,113 @@ create table idempotency_keys (
 );
 \`\`\`
 
-\`\`\`ts
-export async function withIdempotency(
-  key: string,
-  requestHash: string,
-  handler: () => Promise<{ status: number; body: unknown }>,
-) {
-  // The unique PK is what makes this race-safe: two concurrent retries, only
-  // one INSERT wins. No application-level lock required.
-  const claim = await pool.query(
-    "insert into idempotency_keys (key, request_hash) values ($1, $2) on conflict (key) do nothing returning key",
-    [key, requestHash],
-  );
+\`\`\`python
+# app/idempotency.py
+from __future__ import annotations
 
-  if (claim.rowCount === 0) {
-    const { rows } = await pool.query(
-      "select request_hash, status, response_code, response_body from idempotency_keys where key = $1",
-      [key],
-    );
-    const existing = rows[0];
+import hashlib
+import json
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from typing import Any
 
-    // Same key, different body = a client bug. Fail loudly rather than
-    // returning a response for an operation they didn't request.
-    if (existing.request_hash !== requestHash) {
-      throw new ConflictError("Idempotency key reused with a different request body.");
-    }
-    if (existing.status === "in_progress") {
-      throw new ConflictError("A request with this idempotency key is in progress.");
-    }
-    return { status: existing.response_code, body: existing.response_body, replayed: true };
-  }
+import asyncpg
+from fastapi import HTTPException, status
 
-  const result = await handler();
-  await pool.query(
-    "update idempotency_keys set status = 'completed', response_code = $2, response_body = $3 where key = $1",
-    [key, result.status, result.body],
-  );
-  return { ...result, replayed: false };
-}
+
+@dataclass(frozen=True, slots=True)
+class IdempotentResult:
+    status_code: int
+    body: Any
+    replayed: bool
+
+
+def fingerprint(payload: dict[str, Any]) -> str:
+    """Canonical hash of the request body, so key reuse can be detected."""
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+async def with_idempotency(
+    conn: asyncpg.Connection,
+    key: str,
+    request_hash: str,
+    handler: Callable[[], Awaitable[tuple[int, Any]]],
+) -> IdempotentResult:
+    # The primary key is what makes this race-safe: of two concurrent retries
+    # exactly one INSERT wins. No application-level lock required.
+    claimed = await conn.fetchval(
+        """
+        insert into idempotency_keys (key, request_hash)
+        values ($1, $2)
+        on conflict (key) do nothing
+        returning key
+        """,
+        key,
+        request_hash,
+    )
+
+    if claimed is None:
+        existing = await conn.fetchrow(
+            """
+            select request_hash, status, response_code, response_body
+              from idempotency_keys
+             where key = $1
+            """,
+            key,
+        )
+        # Same key, different body = a client bug. Fail loudly rather than
+        # returning a response for an operation they didn't request.
+        if existing["request_hash"] != request_hash:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Idempotency key reused with a different request body.",
+            )
+        if existing["status"] == "in_progress":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A request with this idempotency key is in progress.",
+            )
+        return IdempotentResult(
+            status_code=existing["response_code"],
+            body=json.loads(existing["response_body"]),
+            replayed=True,
+        )
+
+    status_code, body = await handler()
+    await conn.execute(
+        """
+        update idempotency_keys
+           set status = 'completed', response_code = $2, response_body = $3
+         where key = $1
+        """,
+        key,
+        status_code,
+        json.dumps(body),
+    )
+    return IdempotentResult(status_code=status_code, body=body, replayed=False)
+\`\`\`
+
+Wiring it into a route is a header plus the body you already validated:
+
+\`\`\`python
+@router.post("/charges", status_code=status.HTTP_201_CREATED)
+async def create_charge(
+    body: CreateCharge,
+    conn: Annotated[asyncpg.Connection, Depends(get_connection)],
+    idempotency_key: Annotated[str, Header(min_length=8, max_length=255)],
+) -> JSONResponse:
+    result = await with_idempotency(
+        conn,
+        key=idempotency_key,
+        request_hash=fingerprint(body.model_dump(mode="json")),
+        handler=lambda: charge_service.create(conn, body),
+    )
+    return JSONResponse(
+        content=result.body,
+        status_code=result.status_code,
+        headers={"Idempotent-Replayed": str(result.replayed).lower()},
+    )
 \`\`\`
 
 Points worth making unprompted:
@@ -927,46 +1338,68 @@ Points worth making unprompted:
       heading: "N+1, payload shape, and REST vs GraphQL vs gRPC",
       markdown: `### The N+1 query problem
 
-\`\`\`ts
-// 1 query for the tasks, then N more — one per task. 50 tasks = 51 round trips.
-const tasks = await taskRepo.list({ limit: 50 });
-for (const task of tasks) {
-  task.assignee = await userRepo.findById(task.assigneeId);
-}
+\`\`\`python
+async def list_tasks_with_assignees() -> list[Task]:
+    # 1 query for the tasks, then N more — one per task. 50 tasks = 51 round trips.
+    tasks = await task_repo.list(limit=50)
+    for task in tasks:
+        task.assignee = await user_repo.find_by_id(task.assignee_id)
+    return tasks
 \`\`\`
 
-Each query might be 1ms, but 51 sequential round trips is 51ms of pure latency, and it scales linearly with page size. It is the most common performance bug in application code, and ORMs cause it invisibly through lazy-loaded relations.
+Each query might be 1ms, but 51 sequential round trips is 51ms of pure latency, and it scales linearly with page size. It is the most common performance bug in application code, and ORMs cause it invisibly through lazy-loaded relations — in SQLAlchemy, touching \`task.assignee\` on a row you loaded without \`selectinload\` or \`joinedload\` silently issues another query.
 
 Three fixes, in order of preference:
 
-\`\`\`ts
-// 1. A single JOIN — best when you always need the related data.
-const { rows } = await pool.query(\`
-  select t.*, u.id as assignee_id, u.name as assignee_name
-    from tasks t
-    left join users u on u.id = t.assignee_id
-   order by t.created_at desc
-   limit 50
-\`);
+\`\`\`python
+from uuid import UUID
 
-// 2. Two queries with an IN clause — better when the relation is one-to-many
-//    (a JOIN would multiply rows) or optional.
-const tasks = await taskRepo.list({ limit: 50 });
-const ids = [...new Set(tasks.map((t) => t.assigneeId).filter(Boolean))];
-const { rows: users } = await pool.query(
-  "select * from users where id = any($1::uuid[])",
-  [ids],
-);
-const byId = new Map(users.map((u) => [u.id, u]));
-for (const task of tasks) task.assignee = byId.get(task.assigneeId) ?? null;
+import asyncpg
+from strawberry.dataloader import DataLoader
 
-// 3. DataLoader — batches and dedupes automatically within a tick. The standard
-//    answer for GraphQL, where you cannot know the access pattern up front.
-const userLoader = new DataLoader(async (ids: readonly string[]) => {
-  const { rows } = await pool.query("select * from users where id = any($1::uuid[])", [ids]);
-  const byId = new Map(rows.map((u) => [u.id, u]));
-  return ids.map((id) => byId.get(id) ?? null);
-});
+USERS_BY_IDS = "select * from users where id = any($1::uuid[])"
+
+
+# 1. A single JOIN — best when you always need the related data.
+async def with_join(conn: asyncpg.Connection) -> list[asyncpg.Record]:
+    return await conn.fetch(
+        """
+        select t.*, u.id as assignee_id, u.name as assignee_name
+          from tasks t
+          left join users u on u.id = t.assignee_id
+         order by t.created_at desc
+         limit 50
+        """
+    )
+
+
+# 2. Two queries with = any(...) — better when the relation is one-to-many
+#    (a JOIN would multiply rows) or optional.
+async def with_batch_fetch(conn: asyncpg.Connection) -> list[Task]:
+    tasks = await task_repo.list(limit=50)
+    ids = list({t.assignee_id for t in tasks if t.assignee_id is not None})
+    users = await conn.fetch(USERS_BY_IDS, ids)
+    by_id = {user["id"]: user for user in users}
+    for task in tasks:
+        task.assignee = by_id.get(task.assignee_id)
+    return tasks
+
+
+# 3. A DataLoader — batches and dedupes every load issued in the same event-loop
+#    iteration into one query. The standard answer for GraphQL, where you cannot
+#    know the access pattern up front.
+async def load_users(
+    keys: list[UUID], conn: asyncpg.Connection
+) -> list[asyncpg.Record | None]:
+    rows = await conn.fetch(USERS_BY_IDS, keys)
+    by_id = {row["id"]: row for row in rows}
+    return [by_id.get(key) for key in keys]
+
+
+def make_user_loader(conn: asyncpg.Connection) -> DataLoader:
+    # One loader per request, never a module-level singleton: its cache would
+    # otherwise leak one user's data into another request.
+    return DataLoader(load_fn=lambda keys: load_users(keys, conn))
 \`\`\`
 
 **How to detect it:** count queries per request in a test, or log query counts in development and alert above a threshold. Every N+1 I've seen in production was invisible locally with 10 seed rows and catastrophic with 10,000 real ones.
@@ -1010,7 +1443,7 @@ That answer works because it names the condition that flips the decision. "Graph
   questions: [
     {
       q: "What does idempotent mean, and which HTTP methods are?",
-      a: "Idempotent means N identical requests leave the server in the same state as one. `GET`, `HEAD`, `OPTIONS`, `PUT`, and `DELETE` are; `POST` is not; `PATCH` is if the patch is absolute (`{status: 'done'}`) but not if it's relative (`{$inc: {views: 1}}`). The response can differ — first `DELETE` returns 204, second returns 404 — what matters is the resulting state. It matters because networks fail after the server has already processed a request: the client times out without knowing whether it succeeded. With an idempotent method it can just retry. With `POST` it can't, which is why a retry on `POST /orders` creates two orders, and why payments APIs use idempotency keys — a client-generated UUID the server uses to guarantee at-most-once processing. Safety is the related property: safe methods don't change state at all, which is why `GET /users/42/delete` is a genuine bug — a browser prefetcher or link scanner will eventually hit it.",
+      a: "Idempotent means N identical requests leave the server in the same state as one. `GET`, `HEAD`, `OPTIONS`, `PUT`, and `DELETE` are; `POST` is not; `PATCH` is if the patch is absolute (`{\"status\": \"done\"}`) but not if it's relative (`{\"$inc\": {\"views\": 1}}`). The response can differ — first `DELETE` returns 204, second returns 404 — what matters is the resulting state. It matters because networks fail after the server has already processed a request: the client times out without knowing whether it succeeded. With an idempotent method it can just retry. With `POST` it can't, which is why a retry on `POST /orders` creates two orders, and why payments APIs use idempotency keys — a client-generated UUID the server uses to guarantee at-most-once processing. Safety is the related property: safe methods don't change state at all, which is why `GET /users/42/delete` is a genuine bug — a browser prefetcher or link scanner will eventually hit it.",
       weak: "Idempotent means the same input gives the same output, like a pure function. GET is idempotent because it just reads data.",
     },
     {
@@ -1024,12 +1457,12 @@ That answer works because it names the condition that flips the decision. "Graph
     },
     {
       q: "Session cookies or JWTs? Talk me through the tradeoffs.",
-      a: "Sessions for first-party web apps, JWTs for mobile and service-to-service. With a session, the server stores `sessionId -> {userId, expiresAt}` in Redis and the client holds an opaque ID in an HttpOnly, Secure, SameSite cookie. The cost is a lookup per request — sub-millisecond in Redis. The benefit is instant revocation: logout or a ban is one DELETE and takes effect on the next request. JWTs are self-contained and signed, so verification is a local signature check with no round trip, which is why they scale horizontally. But the payload is signed, not encrypted — anyone can read it — and crucially you cannot revoke one. Fire someone at 10:00 and their token works until it expires. Every mitigation reintroduces state: short expiry plus refresh tokens, or a revocation list checked per request, which is a session with extra steps. Claims also go stale: `role: admin` was true at issue time. And in a browser there's no good storage — localStorage is XSS-readable, a cookie is safer but reintroduces CSRF, at which point you should ask why you didn't just use a session. If I use JWTs I pin the algorithm in the verify call, because `alg: none` and RS256/HMAC confusion are real historical exploits.",
+      a: "Sessions for first-party web apps, JWTs for mobile and service-to-service. With a session, the server stores `sessionId -> {userId, expiresAt}` in Redis and the client holds an opaque ID in an HttpOnly, Secure, SameSite cookie. The cost is a lookup per request — sub-millisecond in Redis. The benefit is instant revocation: logout or a ban is one DELETE and takes effect on the next request. JWTs are self-contained and signed, so verification is a local signature check with no round trip, which is why they scale horizontally. But the payload is signed, not encrypted — anyone can read it — and crucially you cannot revoke one. Fire someone at 10:00 and their token works until it expires. Every mitigation reintroduces state: short expiry plus refresh tokens, or a revocation list checked per request, which is a session with extra steps. Claims also go stale: `role: admin` was true at issue time. And in a browser there's no good storage — localStorage is XSS-readable, a cookie is safer but reintroduces CSRF, at which point you should ask why you didn't just use a session. If I use JWTs I pin the algorithm in the verify call — `jwt.decode(token, key, algorithms=[\"RS256\"])` in PyJWT — because `alg: none` and RS256/HMAC confusion are real historical exploits, and I set `options={\"require\": [\"exp\"]}` so a token without an expiry can't verify.",
       weak: "JWTs, because they're stateless so you don't need a database lookup, which makes the app scale better.",
     },
     {
       q: "How do you make sure user A can't read user B's data?",
-      a: "Object-level authorization checks in the service layer, on every read and every write. The critical distinction is that a route-level role check is not enough: `requirePermission('task:update')` confirms this user may update *some* task, not *this* task. If that's all you have, any authenticated member can `PATCH /tasks/{any-id}` and edit another company's data. That's IDOR — broken object-level authorization — and it's consistently number one on the OWASP API Security Top 10. Concretely, the service loads the task, loads the project, and checks the user is a member of that project before doing anything. In SQL that often means scoping the query itself: `where id = $1 and project_id = any($2)` rather than fetching then filtering, so a missing check can't leak. For extra defence at scale, Postgres row-level security enforces it in the database so no query path can bypass it. And on failure I return 404 rather than 403 where existence itself is sensitive, so an attacker can't enumerate IDs by which ones give 403.",
+      a: "Object-level authorization checks in the service layer, on every read and every write. The critical distinction is that a route-level role check is not enough: `Depends(require_permission('task:update'))` confirms this user may update *some* task, not *this* task. If that's all you have, any authenticated member can `PATCH /tasks/{any-id}` and edit another company's data. That's IDOR — broken object-level authorization — and it's consistently number one on the OWASP API Security Top 10. Concretely, the service loads the task, loads the project, and checks the user is a member of that project before doing anything. In SQL that often means scoping the query itself: `where id = $1 and project_id = any($2)` rather than fetching then filtering, so a missing check can't leak. For extra defence at scale, Postgres row-level security enforces it in the database so no query path can bypass it. And on failure I return 404 rather than 403 where existence itself is sensitive, so an attacker can't enumerate IDs by which ones give 403.",
       weak: "The frontend only shows users their own tasks, and every request needs a valid JWT, so they can't see anything that isn't theirs.",
     },
     {
@@ -1038,7 +1471,7 @@ That answer works because it names the condition that flips the decision. "Graph
     },
     {
       q: "Explain ETags and the 304 flow.",
-      a: "An ETag is an opaque version identifier for a representation — a hash of the body, or a row's version/updated_at. The server sends `ETag: \"a3f1c9e7\"` with the 200. On the next request the client sends `If-None-Match: \"a3f1c9e7\"`; if the resource is unchanged the server returns 304 Not Modified with no body, and the client reuses its cached copy. That saves the bytes and the JSON parse — meaningful on mobile. Note it doesn't save the database query unless you derive the ETag from something cheap like a version column and check it before fetching the row. Strong ETags mean byte-identical; weak (`W/\"…\"`) means semantically equivalent, which you want if your serializer isn't byte-stable, otherwise you never get a 304. The part most people miss: the same mechanism gives you optimistic concurrency. `PATCH` with `If-Match: \"a3f1c9e7\"` lets the server reject a write whose base version is stale with 412 Precondition Failed — that's the fix for two users overwriting each other's edits. Server-side it's `update ... where id = $1 and version = $2` and checking rowCount.",
+      a: "An ETag is an opaque version identifier for a representation — a hash of the body, or a row's version/updated_at. The server sends `ETag: \"a3f1c9e7\"` with the 200. On the next request the client sends `If-None-Match: \"a3f1c9e7\"`; if the resource is unchanged the server returns 304 Not Modified with no body, and the client reuses its cached copy. That saves the bytes and the JSON parse — meaningful on mobile. Note it doesn't save the database query unless you derive the ETag from something cheap like a version column and check it before fetching the row. Strong ETags mean byte-identical; weak (`W/\"…\"`) means semantically equivalent, which you want if your serializer isn't byte-stable, otherwise you never get a 304. The part most people miss: the same mechanism gives you optimistic concurrency. `PATCH` with `If-Match: \"a3f1c9e7\"` lets the server reject a write whose base version is stale with 412 Precondition Failed — that's the fix for two users overwriting each other's edits. Server-side it's `update ... where id = $1 and version = $2 returning *`, and if it comes back empty the client's base version was stale.",
     },
     {
       q: "What is CORS and why does the browser send an OPTIONS request first?",
@@ -1051,11 +1484,11 @@ That answer works because it names the condition that flips the decision. "Graph
     },
     {
       q: "What's the N+1 query problem and how do you fix it?",
-      a: "You run one query to fetch N rows, then one more query per row to fetch a relation — 51 round trips for 50 tasks and their assignees. Each query might be 1ms, but they're sequential, so latency grows linearly with page size. ORMs cause it invisibly through lazy-loaded relations, and it's usually invisible locally with 10 seed rows and catastrophic with 10,000 real ones. Three fixes. A JOIN, when you always need the related data — one query, one round trip. Two queries with `where id = any($1)` and an in-memory Map to stitch them, which is better for one-to-many relations where a JOIN would multiply rows. Or DataLoader, which batches and dedupes lookups within a tick — the standard answer in GraphQL, where you can't know the access pattern up front. To detect it, count queries per request in tests or log the count in development and fail above a threshold; you cannot rely on noticing it by feel.",
+      a: "You run one query to fetch N rows, then one more query per row to fetch a relation — 51 round trips for 50 tasks and their assignees. Each query might be 1ms, but they're sequential, so latency grows linearly with page size. ORMs cause it invisibly through lazy-loaded relations, and it's usually invisible locally with 10 seed rows and catastrophic with 10,000 real ones. Three fixes. A JOIN, when you always need the related data — one query, one round trip. Two queries with `where id = any($1::uuid[])` and an in-memory dict to stitch them, which is better for one-to-many relations where a JOIN would multiply rows. Or a DataLoader, which batches and dedupes every load issued in the same event-loop iteration into one query — the standard answer in GraphQL, where you can't know the access pattern up front. To detect it, count queries per request in tests or log the count in development and fail above a threshold; you cannot rely on noticing it by feel.",
     },
     {
       q: "Design a webhook receiver. What can go wrong?",
-      a: "It's a public URL anyone can POST to, so: verify the HMAC signature over the raw request body — parsed-then-reserialized JSON won't match because key order and whitespace differ, so I capture the raw body with `express.raw`. Compare with `timingSafeEqual`, not `===`. The signed payload must include a timestamp, and I reject anything older than about five minutes, because a valid signature is otherwise replayable forever. Delivery is at-least-once, never exactly-once, so I dedupe on the provider's event ID with a unique constraint and `on conflict do nothing` — that's race-safe without an application lock. Then acknowledge with 200 immediately and enqueue the real work: providers time out in 5-10 seconds and retry, so a slow handler turns one event into a thundering herd of retries. Other failure modes: out-of-order delivery, so handlers should be written against the current state rather than assuming sequence; and a bad payload should still return 2xx once recorded, because returning 500 for something I'll never process just burns the provider's retry budget.",
+      a: "It's a public URL anyone can POST to, so: verify the HMAC signature over the raw request body — parsed-then-reserialized JSON won't match because key order and whitespace differ, so I take the raw bytes with `await request.body()` rather than binding a Pydantic model. Compare with `hmac.compare_digest`, never `==` — `==` short-circuits on the first differing byte, so the response time leaks how much of the signature the attacker has already guessed, and `compare_digest` is in the standard library for exactly that reason. The signed payload must include a timestamp, and I reject anything older than about five minutes, because a valid signature is otherwise replayable forever. Delivery is at-least-once, never exactly-once, so I dedupe on the provider's event ID with a unique constraint and `on conflict do nothing` — that's race-safe without an application lock. Then acknowledge with 200 immediately and enqueue the real work: providers time out in 5-10 seconds and retry, so a slow handler turns one event into a thundering herd of retries. Other failure modes: out-of-order delivery, so handlers should be written against the current state rather than assuming sequence; and a bad payload should still return 2xx once recorded, because returning 500 for something I'll never process just burns the provider's retry budget.",
       weak: "I'd add a POST endpoint that takes the event and updates the database. If it's slow I'd optimize the query.",
     },
     {
@@ -1077,7 +1510,7 @@ That answer works because it names the condition that flips the decision. "Graph
     },
     {
       q: "You're given a public API endpoint to harden. What do you check?",
-      a: "In rough order of severity. Object-level authorization: does the handler verify this user may touch this specific resource, or only that they're logged in? That's the most common serious hole. Then input validation as a whitelist with bounds — types, enums, max lengths, max array sizes, a capped `limit`, and a body size limit on the parser — because unbounded input is an availability bug even when it isn't an injection. Then injection: all values parameterized, and any dynamic identifier like a sort column coming from an allowlist, since placeholders can't bind identifiers. Then mass assignment: the insert uses the parsed and stripped object, never `req.body`. Then rate limiting keyed by user with a much tighter limit if it's an auth endpoint. Then output: does the serializer map to an explicit public shape, or does it return the raw row with `password_hash` and internal columns? Then error handling: 4xx for client mistakes and a generic 500 that leaks nothing — no SQL text, no stack traces. Then transport and headers: HTTPS only, HSTS, a CORS allowlist rather than a wildcard, and `no-store` on anything sensitive. Finally logging: is the request logged with a request ID and are credentials redacted?",
+      a: "In rough order of severity. Object-level authorization: does the handler verify this user may touch this specific resource, or only that they're logged in? That's the most common serious hole. Then input validation as a whitelist with bounds — types, enums, max lengths, max array sizes, a capped `limit`, and a body size limit in middleware and at the reverse proxy — because unbounded input is an availability bug even when it isn't an injection. Then injection: all values parameterized, and any dynamic identifier like a sort column coming from an allowlist, since placeholders can't bind identifiers. Then mass assignment: the insert uses the validated Pydantic model with `extra=\"forbid\"`, never `await request.json()`. Then rate limiting keyed by user with a much tighter limit if it's an auth endpoint. Then output: does the serializer map to an explicit public shape, or does it return the raw row with `password_hash` and internal columns? Then error handling: 4xx for client mistakes and a generic 500 that leaks nothing — no SQL text, no stack traces. Then transport and headers: HTTPS only, HSTS, a CORS allowlist rather than a wildcard, and `no-store` on anything sensitive. Finally logging: is the request logged with a request ID and are credentials redacted?",
     },
   ],
 };

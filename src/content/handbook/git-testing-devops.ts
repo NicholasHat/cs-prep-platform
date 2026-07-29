@@ -76,8 +76,8 @@ Almost every "how do I undo this" question is answered by asking *which of the t
 
 | Goal | Command |
 | --- | --- |
-| Unstage a file, keep edits | \`git restore --staged file.ts\` |
-| Throw away uncommitted edits to a file | \`git restore file.ts\` |
+| Unstage a file, keep edits | \`git restore --staged file.py\` |
+| Throw away uncommitted edits to a file | \`git restore file.py\` |
 | Undo last commit, keep changes staged | \`git reset --soft HEAD~1\` |
 | Undo last commit, keep changes unstaged | \`git reset HEAD~1\` (mixed, the default) |
 | Undo last commit, destroy the changes | \`git reset --hard HEAD~1\` |
@@ -105,12 +105,12 @@ git push -u origin feat/rate-limiter
 
 \`\`\`bash
 git log --oneline --graph --decorate --all   # the only log invocation worth memorizing
-git log -p src/auth.ts                       # history of one file, with diffs
+git log -p src/auth.py                       # history of one file, with diffs
 git log -S "TokenBucket"                     # commits that added/removed that string ("pickaxe")
 git diff                                     # working tree vs index
 git diff --staged                            # index vs last commit (what you're about to commit)
 git diff main...feature                      # what the feature branch adds since it diverged
-git blame -L 40,60 src/auth.ts               # who last touched these lines, and in which commit
+git blame -L 40,60 src/auth.py               # who last touched these lines, and in which commit
 git show 4a9f2c1                             # full commit: message + diff
 \`\`\`
 
@@ -211,9 +211,9 @@ git push --force-with-lease
 
 \`\`\`text
 <<<<<<< HEAD
-const TIMEOUT_MS = 5000;
+TIMEOUT_MS = 5000
 =======
-const TIMEOUT_MS = 30000;
+TIMEOUT_MS = 30000
 >>>>>>> feature/slow-uploads
 \`\`\`
 
@@ -224,7 +224,7 @@ During a **merge**, \`HEAD\` is the branch you are on (the target, e.g. \`main\`
 \`\`\`bash
 git status                       # lists "both modified" files — this is your worklist
 # open each file, resolve, delete all conflict markers
-git add src/config.ts            # staging a conflicted file marks it resolved
+git add src/config.py            # staging a conflicted file marks it resolved
 git status                       # confirm nothing is left unmerged
 git merge --continue             # or: git rebase --continue
 \`\`\`
@@ -404,7 +404,7 @@ git bisect good     # or: git bisect bad
 git bisect reset
 \`\`\`
 
-With a scriptable test you can automate the whole thing: \`git bisect run npm test\`. Binary search over 1,000 commits is ten steps.`,
+With a scriptable test you can automate the whole thing: \`git bisect run pytest -q\`. Binary search over 1,000 commits is ten steps.`,
     },
     {
       id: "pr-workflow",
@@ -450,7 +450,7 @@ Rules that actually matter:
 - **Keep PRs small.** Review quality falls off a cliff past a few hundred lines — past that, reviewers start rubber-stamping. Two 200-line PRs get better review than one 400-line PR.
 - **Separate refactors from behavior changes.** "Pure move, no behavior change" in one PR, the actual change in the next. Mixing them hides a real change inside 800 lines of noise.
 - **Write a real PR description**: what, why, how you tested it, screenshots for UI, and anything you want the reviewer to look at hardest.
-- **Review your own diff first**, on the PR page. You will catch the stray \`console.log\` and the debug branch you left in. It takes two minutes and saves a review round trip.
+- **Review your own diff first**, on the PR page. You will catch the stray \`print()\` and the debug branch you left in. It takes two minutes and saves a review round trip.
 
 ### Receiving review
 
@@ -505,51 +505,53 @@ The pyramid is a heuristic, not a law. For a thin CRUD service that is mostly gl
 
 ### Arrange / Act / Assert
 
-\`\`\`ts
-test("applies the bulk discount at exactly 10 items", () => {
-  // Arrange — set up the world
-  const cart = new Cart();
-  cart.add({ sku: "WIDGET", unitPriceCents: 1000, quantity: 10 });
+\`\`\`python
+def test_applies_the_bulk_discount_at_exactly_10_items() -> None:
+    # Arrange — set up the world
+    cart = Cart()
+    cart.add(sku="WIDGET", unit_price_cents=1000, quantity=10)
 
-  // Act — exactly one call, the thing under test
-  const total = cart.totalCents();
+    # Act — exactly one call, the thing under test
+    total = cart.total_cents()
 
-  // Assert — one behavior
-  expect(total).toBe(9000); // 10% off at the 10-item threshold
-});
+    # Assert — one behavior
+    assert total == 9000  # 10% off at the 10-item threshold
 \`\`\`
 
-Three blocks, in that order, visually separated. If Act is more than one line, you are probably testing two things.
+Three blocks, in that order, visually separated. If Act is more than one line, you are probably testing two things. Note that pytest needs nothing but a bare \`assert\` — it rewrites the expression so a failure prints both sides, which is why a custom \`assertEqual\`-style API is unnecessary.
 
 ### Test behavior, not implementation
 
-\`\`\`ts
-// Bad: couples the test to how the code works internally.
-// Refactoring the cache breaks the test even though behavior is identical.
-test("caches the user", () => {
-  service.getUser("u1");
-  expect(service._cache.has("u1")).toBe(true);
-});
+\`\`\`python
+# Bad: couples the test to how the code works internally.
+# Refactoring the cache breaks the test even though behavior is identical.
+def test_caches_the_user(service: UserService) -> None:
+    service.get_user("u1")
+    assert "u1" in service._cache
 
-// Good: asserts the observable contract.
-test("fetches a given user only once", async () => {
-  const fetchSpy = jest.spyOn(repo, "findById");
-  await service.getUser("u1");
-  await service.getUser("u1");
-  expect(fetchSpy).toHaveBeenCalledTimes(1);
-});
+
+# Good: asserts the observable contract.
+def test_fetches_a_given_user_only_once(mocker, service: UserService) -> None:
+    fetch_spy = mocker.spy(service.repo, "find_by_id")
+
+    service.get_user("u1")
+    service.get_user("u1")
+
+    assert fetch_spy.call_count == 1
 \`\`\`
 
 The rule of thumb: **a pure refactor should not break a single test.** If refactoring breaks tests, the tests were describing implementation, and they will fight every future change instead of protecting it.
 
 ### Names that read as specifications
 
-\`\`\`ts
-test("test1", ...)                                              // useless
-test("cart", ...)                                               // useless
-test("returns 0 for an empty cart", ...)                        // good
-test("throws InsufficientStock when quantity exceeds inventory", ...)  // good
+\`\`\`python
+def test_1(): ...                                                   # useless
+def test_cart(): ...                                                # useless
+def test_returns_0_for_an_empty_cart(): ...                         # good
+def test_raises_insufficient_stock_when_quantity_exceeds_inventory(): ...  # good
 \`\`\`
+
+Long snake_case names look odd at first and are exactly right here — pytest prints the function name on failure, so the name is the report.
 
 When CI fails at 2am, the test name is the entire bug report you get. Write it for that moment.
 
@@ -559,23 +561,69 @@ When CI fails at 2am, the test name is the entire bug report you get. Write it f
 - **Isolated.** Each test creates its own data and cleans up. Tests that pass alone and fail in a suite are a shared-state bug.
 - **Fast.** Slow unit tests do not get run locally, and tests you do not run do not protect you.
 - **One reason to fail.** Ten assertions in one test means the first failure hides the other nine.
-- **Test the boundaries.** Empty, one, many, exactly-at-limit, one-over-limit, null, negative, duplicate, unicode. Off-by-one bugs live at exactly the boundary — assert at 9, 10, and 11, not just at 5.
+- **Test the boundaries.** Empty, one, many, exactly-at-limit, one-over-limit, \`None\`, negative, duplicate, unicode. Off-by-one bugs live at exactly the boundary — assert at 9, 10, and 11, not just at 5.
 
 ### Table-driven tests for boundaries
 
-\`\`\`ts
-describe("bulk discount thresholds", () => {
-  test.each([
-    [9, 9000],    // below threshold, no discount
-    [10, 9000],   // at threshold, 10% off
-    [11, 9900],   // above threshold
-  ])("quantity %i costs %i cents", (quantity, expected) => {
-    const cart = new Cart();
-    cart.add({ sku: "WIDGET", unitPriceCents: 1000, quantity });
-    expect(cart.totalCents()).toBe(expected);
-  });
-});
-\`\`\``,
+\`\`\`python
+import pytest
+
+
+@pytest.mark.parametrize(
+    ("quantity", "expected_cents"),
+    [
+        pytest.param(9, 9000, id="below-threshold-no-discount"),
+        pytest.param(10, 9000, id="at-threshold-10-percent-off"),
+        pytest.param(11, 9900, id="above-threshold"),
+    ],
+)
+def test_bulk_discount_thresholds(quantity: int, expected_cents: int) -> None:
+    cart = Cart()
+    cart.add(sku="WIDGET", unit_price_cents=1000, quantity=quantity)
+
+    assert cart.total_cents() == expected_cents
+\`\`\`
+
+\`parametrize\` generates one independent test per row, so a failure at quantity 11 does not hide the result at 9 and 10 — which is the whole point of asserting at the boundary. Give each row an \`id\`; it becomes the name in the failure output.
+
+### Fixtures instead of setup methods
+
+\`\`\`python
+import pytest
+
+
+@pytest.fixture
+def cart() -> Cart:
+    """A fresh cart per test — pytest re-runs this for every test that asks for it."""
+    return Cart()
+
+
+@pytest.fixture
+def stocked_cart(cart: Cart) -> Cart:
+    """Fixtures compose: this one requests the previous one by name."""
+    cart.add(sku="WIDGET", unit_price_cents=1000, quantity=1)
+    return cart
+
+
+def test_empty_cart_costs_nothing(cart: Cart) -> None:
+    assert cart.total_cents() == 0
+
+
+def test_single_item_is_charged_at_full_price(stocked_cart: Cart) -> None:
+    assert stocked_cart.total_cents() == 1000
+\`\`\`
+
+A fixture is requested by naming it as a parameter, which makes each test's dependencies explicit in its signature rather than hidden in a base class. Use \`yield\` instead of \`return\` when you need teardown, and keep the default function scope unless a resource is genuinely expensive — a \`scope="session"\` fixture is shared mutable state and the classic source of order-dependent tests.
+
+### Asserting on failure
+
+\`\`\`python
+def test_raises_insufficient_stock_when_quantity_exceeds_inventory(cart: Cart) -> None:
+    with pytest.raises(InsufficientStock, match="only 3 left"):
+        cart.add(sku="WIDGET", unit_price_cents=1000, quantity=4)
+\`\`\`
+
+\`pytest.raises\` asserts both that the block raised and that it raised the right type; \`match\` is a regex against the message, which stops the test from passing on a *different* \`InsufficientStock\`. A bare \`try\`/\`except\` that swallows the exception passes even when nothing is raised.`,
     },
     {
       id: "mocks-and-doubles",
@@ -590,21 +638,45 @@ describe("bulk discount thresholds", () => {
 | **Mock** | Pre-programmed with expectations; fails if not met | The interaction *is* the behavior under test |
 | **Fake** | A working lightweight implementation | In-memory repository, SQLite for Postgres |
 
-\`\`\`ts
-// Stub: the payment gateway always approves. We are testing order logic, not Stripe.
-const gateway = { charge: async () => ({ ok: true, id: "ch_123" }) };
+\`\`\`python
+from unittest.mock import Mock
 
-// Spy: assert we actually notified the user.
-const notifier = { send: jest.fn() };
-await placeOrder({ gateway, notifier }, order);
-expect(notifier.send).toHaveBeenCalledWith("u1", "order_confirmed");
 
-// Fake: a real, working, in-memory implementation of the repository interface.
-class InMemoryOrderRepo implements OrderRepo {
-  private rows = new Map<string, Order>();
-  async save(o: Order) { this.rows.set(o.id, o); }
-  async findById(id: string) { return this.rows.get(id) ?? null; }
-}
+# Stub: the payment gateway always approves. We are testing order logic, not Stripe.
+class ApprovingGateway:
+    def charge(self, amount_cents: int) -> Charge:
+        return Charge(ok=True, id="ch_123")
+
+
+# Spy: assert we actually notified the user.
+def test_places_an_order_and_notifies_the_customer() -> None:
+    notifier = Mock(spec=Notifier)  # spec= makes a typo'd method name fail loudly
+
+    place_order(ApprovingGateway(), notifier, order)
+
+    notifier.send.assert_called_once_with("u1", "order_confirmed")
+
+
+# Fake: a real, working, in-memory implementation of the repository protocol.
+class InMemoryOrderRepo:
+    def __init__(self) -> None:
+        self._rows: dict[str, Order] = {}
+
+    def save(self, order: Order) -> None:
+        self._rows[order.id] = order
+
+    def find_by_id(self, order_id: str) -> Order | None:
+        return self._rows.get(order_id)
+\`\`\`
+
+Two Python-specific notes worth saying in an interview. \`Mock(spec=Notifier)\` (or \`autospec=True\` with \`patch\`) is the difference between a double that catches a renamed method and one that cheerfully accepts \`notifier.snd(...)\` and returns another \`Mock\` — a plain \`Mock\` asserts nothing about the interface it is standing in for. And **patch where the name is looked up, not where it is defined**: if \`orders.py\` does \`from billing import charge\`, you patch \`orders.charge\`, not \`billing.charge\`. That single rule accounts for most "my patch did nothing" bugs.
+
+\`\`\`python
+def test_charges_the_card(monkeypatch: pytest.MonkeyPatch) -> None:
+    # monkeypatch is pytest's built-in patcher; it undoes itself at teardown.
+    monkeypatch.setattr("orders.charge", lambda cents: Charge(ok=True, id="ch_1"))
+
+    assert place_order(order).status == "paid"
 \`\`\`
 
 ### When mocking is a trap
@@ -626,20 +698,21 @@ The heuristic: **mock at the process boundary — network, clock, filesystem, ra
 
 Coverage measures which lines *executed* during the suite. It says nothing about whether you asserted anything meaningful:
 
-\`\`\`ts
-// 100% line coverage of applyDiscount. Zero value.
-test("does not crash", () => {
-  expect(() => applyDiscount(cart)).not.toThrow();
-});
+\`\`\`python
+# 100% line coverage of apply_discount. Zero value.
+def test_does_not_crash(cart: Cart) -> None:
+    apply_discount(cart)  # no assertion; any return value passes
 \`\`\`
+
+Run it with \`pytest --cov=shop --cov-branch --cov-report=term-missing\` (that is \`pytest-cov\` wrapping \`coverage.py\`). \`--cov-branch\` is the flag that matters: without it, an \`if\` whose body always runs counts as covered even though the false branch was never taken, and \`term-missing\` prints the specific uncovered line numbers rather than a percentage you cannot act on.
 
 Why 100% is a bad goal:
 
-- It rewards writing tests for trivial code (getters, DTOs, generated files) because that is the cheapest way to move the number.
+- It rewards writing tests for trivial code (properties, dataclasses, generated protobuf stubs) because that is the cheapest way to move the number.
 - The last 10% is usually defensive branches that are hard to trigger and low-risk, so you spend disproportionate effort for near-zero payoff.
 - Once it becomes a gate, people write assertion-free tests to pass it. You now have a worse suite *and* a green metric.
 
-Better practice: use coverage as a **diff-level flag** ("this PR added 200 lines with no tests — is that deliberate?") rather than a global target. Branch coverage is more informative than line coverage, and mutation testing (Stryker, PIT) measures what you actually want: it changes your code and checks whether a test notices.
+Better practice: use coverage as a **diff-level flag** ("this PR added 200 lines with no tests — is that deliberate?") rather than a global target. Branch coverage (\`--cov-branch\`) is more informative than line coverage, and mutation testing (\`mutmut\`, \`cosmic-ray\`) measures what you actually want: it changes your code and checks whether a test notices.
 
 ### TDD, honestly
 
@@ -658,35 +731,63 @@ The honest interview answer: "I don't do strict TDD for everything, but I always
 
 ### Testing async code
 
-\`\`\`ts
-// Always return or await the promise — a forgotten await gives a false pass.
-test("rejects an expired token", async () => {
-  await expect(verify(expiredToken)).rejects.toThrow(TokenExpiredError);
-});
+\`pytest\` cannot await a coroutine on its own — an \`async def\` test without a plugin is collected, never awaited, and reported as passing. Install \`pytest-asyncio\` and set \`asyncio_mode = "auto"\` in \`pyproject.toml\`, or mark each test explicitly.
 
-// Control time instead of sleeping.
-test("retries after backoff", async () => {
-  jest.useFakeTimers();
-  const p = fetchWithRetry(url);
-  await jest.advanceTimersByTimeAsync(1000);
-  await expect(p).resolves.toEqual({ ok: true });
-  jest.useRealTimers();
-});
+\`\`\`python
+import asyncio
+
+import pytest
+
+
+# A forgotten await is the classic false pass: verify(...) returns a coroutine,
+# which is truthy, so an assertion on it succeeds without running anything.
+@pytest.mark.asyncio
+async def test_rejects_an_expired_token() -> None:
+    with pytest.raises(TokenExpiredError):
+        await verify(expired_token)
+
+
+# Control time instead of sleeping: patch the thing that sleeps.
+@pytest.mark.asyncio
+async def test_retries_after_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    slept: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    result = await fetch_with_retry(url)
+
+    assert result == {"ok": True}
+    assert slept == [1.0, 2.0]  # the backoff schedule is part of the contract
+
+
+# Wait for the condition, with a timeout, rather than for a fixed duration.
+@pytest.mark.asyncio
+async def test_worker_drains_the_queue() -> None:
+    worker = Worker(queue)
+    task = asyncio.create_task(worker.run())
+
+    await asyncio.wait_for(worker.idle.wait(), timeout=5)
+
+    task.cancel()
+    assert queue.empty()
 \`\`\`
 
-Never \`sleep(500)\` and hope. That is simultaneously slow (it always waits) and flaky (sometimes 500ms is not enough on a loaded CI box). Wait for the *condition*, not for the clock.
+Never \`time.sleep(0.5)\` and hope. That is simultaneously slow (it always waits) and flaky (sometimes 500ms is not enough on a loaded CI box). Wait for the *condition* with a generous timeout, not for the clock. The same rule applies to synchronous code: freeze the clock with \`freezegun\` or inject a \`now()\` callable rather than asserting against \`datetime.now()\`.
 
 ### Flaky tests
 
 A flaky test passes and fails on identical code. The usual causes:
 
 - **Time**: real clocks, timezone assumptions, tests that break at midnight or in February.
-- **Order dependence**: shared mutable state between tests. Detect it by randomizing test order.
+- **Order dependence**: shared mutable state between tests — a module-level global, a \`scope="session"\` fixture, a mutable default argument. Detect it with \`pytest-randomly\`, which shuffles order and reseeds the RNG every run.
 - **Concurrency**: races between async operations with no synchronization point.
 - **Environment**: unseeded randomness, port collisions, leftover DB rows, network calls.
 - **Waiting on the clock instead of the condition**, per above.
 
-The organizational point matters as much as the technical one: **a flaky test is a broken test.** Quarantine it out of the required build immediately so it stops training the team to ignore red, file a ticket, and fix or delete it. Teams that let flakes accumulate stop believing CI, and then CI stops working — not technically, socially.`,
+The organizational point matters as much as the technical one: **a flaky test is a broken test.** Quarantine it out of the required build immediately — a \`@pytest.mark.quarantine\` marker plus \`pytest -m "not quarantine"\` in CI does it — so it stops training the team to ignore red, file a ticket, and fix or delete it. Note that \`pytest-rerunfailures\` hides flakes rather than fixing them; retrying is a stopgap, not a resolution. Teams that let flakes accumulate stop believing CI, and then CI stops working — not technically, socially.`,
     },
     {
       id: "ci-cd",
@@ -721,33 +822,33 @@ jobs:
         ports: ["5432:5432"]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: astral-sh/setup-uv@v5
         with:
-          node-version: 22
-          cache: npm
-      - run: npm ci                 # not "npm install" — see below
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm run test -- --coverage
-      - run: npm run build
+          enable-cache: true        # caches the resolved dependency set
+      - run: uv sync --frozen       # not "uv sync" alone — see below
+      - run: uv run ruff check .    # lint
+      - run: uv run ruff format --check .
+      - run: uv run mypy src        # static type check
+      - run: uv run pytest --cov=src --cov-branch --cov-report=xml
+      - run: uv build               # produce the wheel that gets deployed
 \`\`\`
 
 Details worth knowing:
 
-- \`npm ci\` installs exactly what the lockfile says and fails if \`package.json\` and the lockfile disagree. \`npm install\` may silently resolve new versions, which means CI is not testing what you tested. **Always \`ci\` in CI.**
-- Ordering is cheapest-first: lint and typecheck fail in seconds, so do not make people wait five minutes for a build to discover a missing semicolon.
+- \`uv sync --frozen\` installs exactly what \`uv.lock\` says and fails if the lockfile is out of date with respect to \`pyproject.toml\`. Without \`--frozen\`, the resolver may pick up newer versions, which means CI is not testing what you tested. The \`pip\` equivalent is \`pip install --require-hashes -r requirements.lock\`, generated by \`pip-compile\` or \`uv pip compile\`. **The lockfile is the contract; installing anything else makes the build non-reproducible.**
+- Ordering is cheapest-first: \`ruff\` finishes in well under a second and \`mypy\` in a few, so do not make people wait five minutes for a test run to discover an unused import.
 - A real Postgres service container, not a mock.
 - Caching dependencies is usually the single biggest pipeline speedup.
 
 ### What "the build" actually does
 
-For a compiled language: resolve dependencies → compile to object code → link → produce a binary/JAR. For TypeScript/JS: type-check → transpile to JS → bundle (resolve the module graph, tree-shake dead code) → minify → emit hashed asset filenames for cache-busting → produce source maps.
+For a compiled language: resolve dependencies → compile to object code → link → produce a binary/JAR. For Python there is no compile step to speak of, which changes what "build" means rather than removing it: resolve and lock dependencies → run the type checker (the closest thing Python has to a compiler telling you no) → package the source into a wheel with \`uv build\` or \`python -m build\` → and, in practice, bake that wheel plus a pinned interpreter into a container image, because the image is the only artifact that pins the interpreter and the C libraries your wheels link against.
 
 The output of the build is an **artifact**: an immutable, versioned thing (a JAR, a binary, a Docker image, a folder of static files). The one rule everything else depends on: **build once, deploy that same artifact to every environment.** If you rebuild per environment you can no longer claim that what you tested in staging is what runs in prod.
 
 ### The other jobs a mature pipeline runs
 
-- Dependency vulnerability scan (\`npm audit\`, Dependabot, Snyk).
+- Dependency vulnerability scan (\`pip-audit\`, Dependabot, Snyk).
 - Secret scanning on the diff.
 - Build the Docker image and push it to a registry, tagged with the commit SHA.
 - Deploy to staging automatically; production on approval or on a tag.
@@ -758,7 +859,7 @@ The output of the build is an **artifact**: an immutable, versioned thing (a JAR
       heading: "Docker: images, containers, layers, and a real Dockerfile",
       markdown: `### The problem it solves
 
-"Works on my machine" is a dependency problem: your laptop has Node 22, OpenSSL 3, and a system library the server lacks. A container packages the application *and* its userland dependencies into one immutable image, so the thing that ran in CI is byte-identical to the thing running in production.
+"Works on my machine" is a dependency problem: your laptop has Python 3.12, OpenSSL 3, and the \`libpq\` that \`psycopg\` links against — the server has none of them, or has different versions. A container packages the application *and* its userland dependencies into one immutable image, so the thing that ran in CI is byte-identical to the thing running in production.
 
 ### Image vs container
 
@@ -769,65 +870,95 @@ Containers are *not* VMs. A VM virtualizes hardware and runs a full guest kernel
 
 ### Layers and caching
 
-Each instruction that changes the filesystem creates a layer. Layers are content-addressed and cached; on rebuild, Docker reuses cached layers until the first one whose inputs changed, then rebuilds everything after it. **Order instructions from least- to most-frequently-changing.** That single principle is why the Dockerfile below copies \`package.json\` before the source code: your source changes every commit, your dependencies do not, so dependency installation stays cached.
+Each instruction that changes the filesystem creates a layer. Layers are content-addressed and cached; on rebuild, Docker reuses cached layers until the first one whose inputs changed, then rebuilds everything after it. **Order instructions from least- to most-frequently-changing.** That single principle is why the Dockerfile below copies \`pyproject.toml\` and the lockfile before the source code: your source changes every commit, your dependencies do not, so dependency installation stays cached.
 
 ### A real, production-shaped Dockerfile
 
 \`\`\`dockerfile
 # syntax=docker/dockerfile:1
 
-# ---- Stage 1: install production dependencies only -------------------------
-FROM node:22-alpine AS deps
+# ---- Stage 1: build a self-contained virtualenv ----------------------------
+# The builder is allowed to be fat: it carries gcc and the -dev headers that
+# any package without a prebuilt wheel needs in order to compile.
+FROM python:3.12-slim AS builder
+
+# PYTHONDONTWRITEBYTECODE: .pyc files are dead weight in a layer.
+# PYTHONUNBUFFERED: without it your logs sit in a buffer and vanish on crash.
+# UV_PROJECT_ENVIRONMENT: build the venv at /opt/venv instead of ./.venv, so a
+# bind-mounted source tree in local development cannot shadow it, and so the
+# whole environment is one directory to copy into the runtime stage.
+ENV PYTHONDONTWRITEBYTECODE=1 \\
+    PYTHONUNBUFFERED=1 \\
+    UV_PROJECT_ENVIRONMENT=/opt/venv \\
+    PATH="/opt/venv/bin:$PATH"
+
+RUN apt-get update \\
+ && apt-get install -y --no-install-recommends build-essential libpq-dev \\
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
+
 # Copy only the manifests first. This layer's cache key is these two files,
-# so editing src/ does NOT invalidate the (slow) npm install below.
-COPY package.json package-lock.json ./
-# "ci" respects the lockfile exactly; --omit=dev drops devDependencies.
-RUN npm ci --omit=dev
+# so editing src/ does NOT invalidate the (slow) dependency install below.
+COPY pyproject.toml uv.lock ./
+# --frozen installs exactly the locked versions and fails if the lock is stale.
+# --no-install-project installs dependencies only, so the app's own source
+# staying out of this layer is what keeps the cache hit rate high.
+RUN pip install --no-cache-dir uv \\
+ && uv sync --frozen --no-dev --no-install-project
 
-# ---- Stage 2: build (needs devDependencies: tsc, bundler) ------------------
-FROM node:22-alpine AS build
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
+# Now the source, which changes every commit, and only then the app itself.
+COPY src/ ./src/
+RUN uv sync --frozen --no-dev
 
-# ---- Stage 3: the runtime image that actually ships ------------------------
-FROM node:22-alpine AS runtime
-# NODE_ENV=production changes framework behavior (no dev warnings, caching on).
-ENV NODE_ENV=production
-WORKDIR /app
+# ---- Stage 2: the runtime image that actually ships ------------------------
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \\
+    PYTHONUNBUFFERED=1 \\
+    PATH="/opt/venv/bin:$PATH"
+
+# Runtime needs the shared library only — not the -dev headers or the compiler.
+RUN apt-get update \\
+ && apt-get install -y --no-install-recommends libpq5 curl \\
+ && rm -rf /var/lib/apt/lists/*
 
 # Run as a non-root user. If the process is compromised, the blast radius is
 # a user with no privileges rather than root inside the container.
-RUN addgroup -S app && adduser -S app -G app
+RUN groupadd --system app && useradd --system --gid app --no-create-home app
 
-# Copy only what the runtime needs, from the earlier stages. The compilers,
-# devDependencies, source files, and build cache never enter this image.
-COPY --from=deps  /app/node_modules ./node_modules
-COPY --from=build /app/dist          ./dist
-COPY package.json ./
+WORKDIR /app
+
+# Copy only what the runtime needs. gcc, the -dev headers, the test suite,
+# and the build cache never enter this image.
+COPY --from=builder --chown=app:app /opt/venv /opt/venv
+COPY --from=builder --chown=app:app /app/src  /app/src
 
 USER app
-EXPOSE 3000
+EXPOSE 8000
 
 # HEALTHCHECK lets the orchestrator know when this container is actually
 # serving, not merely running — that is what makes rolling deploys safe.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \\
-  CMD wget -qO- http://localhost:3000/healthz || exit 1
+  CMD curl -fsS http://localhost:8000/healthz || exit 1
 
 # Exec form (JSON array), not shell form: the process becomes PID 1 and
-# receives SIGTERM directly, so it can shut down gracefully. With shell form
-# a /bin/sh wrapper is PID 1, swallows the signal, and you get SIGKILLed.
-CMD ["node", "dist/server.js"]
+# receives SIGTERM directly, so it can drain connections and shut down
+# gracefully. With shell form a /bin/sh wrapper is PID 1, swallows the
+# signal, and you get SIGKILLed 30 seconds later mid-request.
+CMD ["gunicorn", "app.main:app", \\
+     "--worker-class", "uvicorn.workers.UvicornWorker", \\
+     "--bind", "0.0.0.0:8000", \\
+     "--workers", "4"]
 \`\`\`
 
-Why the multi-stage build matters: a single-stage image carrying the toolchain, devDependencies, and sources is often 1.2 GB. This one is well under 200 MB. Smaller images pull faster (which is deploy latency and rollback latency) and have a much smaller CVE surface, because half a gigabyte of build tooling is half a gigabyte of things a scanner can flag.
+Why the multi-stage build matters: a single-stage image carrying \`build-essential\`, the \`-dev\` headers, and the test suite is often over 1 GB. This one is a few hundred MB. Smaller images pull faster (which is deploy latency and rollback latency) and have a much smaller CVE surface, because half a gigabyte of build tooling is half a gigabyte of things a scanner can flag.
+
+The Python-specific trick is that the artifact you copy between stages is the **virtualenv**. It is a self-contained directory, so \`COPY --from=builder /opt/venv /opt/venv\` moves every installed package — including compiled C extensions — in one instruction, and putting it on \`PATH\` is all the "activation" a container needs. Two caveats to have ready: the stages must share a base image so the compiled extensions are ABI-compatible, and \`python:3.12-alpine\` is a trap for Python specifically — musl means many packages have no prebuilt wheel, so builds get slower and images can end up *larger* than the Debian slim equivalent.
 
 Other points to have ready:
 
-- **\`.dockerignore\` is not optional.** Without it, \`COPY . .\` ships \`node_modules\`, \`.git\`, and \`.env\` into the image — slow, and a secret leak. It should contain at minimum \`node_modules\`, \`.git\`, \`.env*\`, \`dist\`.
+- **\`.dockerignore\` is not optional.** Without it, \`COPY . .\` ships \`.venv\`, \`.git\`, and \`.env\` into the image — slow, and a secret leak. Worse, a copied \`.venv\` built on macOS contains binaries that will not run on Linux. It should contain at minimum \`.venv\`, \`__pycache__\`, \`*.pyc\`, \`.git\`, \`.env*\`, \`.pytest_cache\`, \`.mypy_cache\`.
 - **\`CMD\` vs \`ENTRYPOINT\`**: \`ENTRYPOINT\` is the executable; \`CMD\` provides default arguments and is what \`docker run <image> <args>\` overrides.
 - **\`COPY\` vs \`ADD\`**: use \`COPY\`. \`ADD\` also fetches URLs and auto-extracts archives, which is surprising behavior you rarely want.
 - **Never bake secrets into an image.** Layers are permanent — \`ENV API_KEY=...\` is readable by anyone who pulls the image, even if a later layer unsets it. Inject secrets at runtime.
@@ -837,7 +968,7 @@ Other points to have ready:
 
 \`\`\`bash
 docker build -t api:sha-4a9f2c1 .
-docker run --rm -p 3000:3000 --env-file .env api:sha-4a9f2c1
+docker run --rm -p 8000:8000 --env-file .env api:sha-4a9f2c1
 docker ps                                  # running containers
 docker logs -f <container>                 # follow logs
 docker exec -it <container> sh             # shell into a running container
@@ -860,11 +991,11 @@ The same artifact moves right through this chain. Only **configuration** changes
 
 A flag decouples *deploying* code from *releasing* a feature:
 
-\`\`\`ts
-if (await flags.isEnabled("new-checkout", { userId })) {
-  return newCheckout(order);
-}
-return legacyCheckout(order);
+\`\`\`python
+async def checkout(order: Order, user_id: str) -> Receipt:
+    if await flags.is_enabled("new-checkout", user_id=user_id):
+        return await new_checkout(order)
+    return await legacy_checkout(order)
 \`\`\`
 
 What that buys you:
@@ -911,7 +1042,7 @@ kubectl rollout status deployment/api
 The three signals to name:
 
 - **Metrics** — cheap numeric time series (request rate, error rate, p50/p95/p99 latency, saturation). Aggregate; good for dashboards and alerts.
-- **Logs** — discrete events with context. Structured JSON, not \`console.log\` strings, so they are queryable. Include a request/trace id on every line.
+- **Logs** — discrete events with context. Structured JSON, not \`print()\` or f-string messages, so they are queryable — \`structlog\` or the stdlib \`logging\` module with a JSON formatter. Include a request/trace id on every line.
 - **Traces** — one request's path across services, with timing per hop. This is how you answer "which of these eleven services made checkout slow."
 
 Two frameworks worth naming:
@@ -954,21 +1085,21 @@ Use **percentiles, not averages**. An average latency of 200ms is compatible wit
     },
     {
       q: "What makes a good unit test?",
-      a: "It tests one observable behavior, it's readable as a specification, and it fails only when something is genuinely wrong. Structurally: arrange/act/assert with one call in the act step. The name states the behavior — 'throws InsufficientStock when quantity exceeds inventory,' not 'test cart' — because when CI fails at 2am the test name is the entire bug report. It asserts on the contract, not internals: my rule of thumb is that a pure refactor should not break a single test, and if it does, the tests were describing implementation and will fight every future change. It's deterministic — injected clock, seeded randomness, no network, no dependence on execution order — and it covers boundaries, so I assert at 9, 10, and 11 rather than at 5, because off-by-one bugs live exactly at the boundary.",
+      a: "It tests one observable behavior, it's readable as a specification, and it fails only when something is genuinely wrong. Structurally: arrange/act/assert with one call in the act step — in pytest that's a plain `assert`, since pytest rewrites the expression and prints both sides on failure. The name states the behavior — `test_raises_insufficient_stock_when_quantity_exceeds_inventory`, not `test_cart` — because when CI fails at 2am the test name is the entire bug report. It asserts on the contract, not internals: my rule of thumb is that a pure refactor should not break a single test, and if it does, the tests were describing implementation and will fight every future change. It's deterministic — injected clock, seeded randomness, no network, no dependence on execution order, which I'd verify with `pytest-randomly` — and it covers boundaries, so I use `@pytest.mark.parametrize` to assert at 9, 10, and 11 rather than at 5, because off-by-one bugs live exactly at the boundary, and parametrize gives me one independent test per row so the first failure doesn't hide the rest.",
       weak: "A good unit test tests one function and gets high coverage of it.",
     },
     {
       q: "When is mocking a mistake?",
-      a: "Four cases. Mocking something you don't own — if I mock the Stripe SDK based on my belief about its response shape, my test passes forever including when Stripe changes it; better to wrap third-party APIs in my own interface and mock that, with a few real contract tests against a sandbox. Over-mocking, where every collaborator is faked so the test only asserts that the code called the functions I told it to call, in the order I expected — if setup is 30 lines of mocks for 3 lines of assertion, that's the design telling me the unit has too many dependencies. Mocking the database, which validates nothing about my SQL, schema, or migrations — use a real Postgres in a container. And strict mocks asserting an exact sequence of internal calls, which makes every refactor a test rewrite. My heuristic is to mock at the process boundary — network, clock, filesystem, randomness — and use real objects inside it.",
+      a: "Four cases. Mocking something you don't own — if I mock the Stripe SDK based on my belief about its response shape, my test passes forever including when Stripe changes it; better to wrap third-party APIs in my own interface and mock that, with a few real contract tests against a sandbox. Over-mocking, where every collaborator is faked so the test only asserts that the code called the functions I told it to call, in the order I expected — if setup is 30 lines of mocks for 3 lines of assertion, that's the design telling me the unit has too many dependencies. Mocking the database, which validates nothing about my SQL, schema, or migrations — use a real Postgres in a container. And strict mocks asserting an exact sequence of internal calls, which makes every refactor a test rewrite. My heuristic is to mock at the process boundary — network, clock, filesystem, randomness — and use real objects inside it. Two Python specifics I'd mention: always pass `spec=` or use `autospec=True`, because a bare `Mock` happily accepts a misspelled method and returns another `Mock`, so the test passes after you rename something; and patch where the name is looked up, not where it's defined — if `orders.py` does `from billing import charge`, you patch `orders.charge`. I prefer `monkeypatch` in pytest since it undoes itself at teardown.",
     },
     {
       q: "Should you aim for 100% test coverage?",
-      a: "No. Coverage measures which lines executed, not whether you asserted anything meaningful — a test that just checks the function doesn't throw can hit 100% and be worthless. Chasing 100% has specific failure modes: it rewards writing tests for trivial getters and DTOs because that's the cheapest way to move the number, the last 10% is usually low-risk defensive branches that cost disproportionate effort, and once it's a hard gate people write assertion-free tests to pass it, so you end up with a worse suite and a green metric. I use coverage as a diff-level flag — 'this PR added 200 lines with no tests, is that deliberate?' — rather than a global target. Branch coverage tells you more than line coverage, and mutation testing measures the thing you actually care about: it mutates your code and checks whether any test notices.",
+      a: "No. Coverage measures which lines executed, not whether you asserted anything meaningful — a test that calls the function with no assertion at all can hit 100% and be worthless. Chasing 100% has specific failure modes: it rewards writing tests for trivial properties and dataclasses because that's the cheapest way to move the number, the last 10% is usually low-risk defensive branches that cost disproportionate effort, and once it's a hard gate people write assertion-free tests to pass it, so you end up with a worse suite and a green metric. I use coverage as a diff-level flag — 'this PR added 200 lines with no tests, is that deliberate?' — rather than a global target. Practically that's `pytest --cov=src --cov-branch --cov-report=term-missing`: branch coverage tells you more than line coverage, because an `if` whose body always runs counts as covered even though the false branch never executed, and `term-missing` gives you actionable line numbers instead of a percentage. Mutation testing with `mutmut` measures the thing you actually care about: it mutates your code and checks whether any test notices.",
       weak: "Yes, 100% coverage means the code is fully tested and there are no bugs.",
     },
     {
       q: "What is a flaky test and how do you deal with one?",
-      a: "A test that passes and fails on identical code. Usual causes: real clocks and timezone assumptions, order dependence from shared mutable state, races between async operations, unseeded randomness, port collisions, leftover database rows, and sleeping for a fixed duration instead of waiting for a condition. That last one is both slow and flaky, since the sleep always waits and sometimes still isn't long enough on a loaded CI box. The organizational answer matters as much as the technical one: a flaky test is a broken test. I'd quarantine it out of the required build immediately so it stops training people to ignore red, file a ticket, and fix or delete it. Teams that let flakes accumulate stop believing CI, and then CI stops working — not technically, socially.",
+      a: "A test that passes and fails on identical code. Usual causes: real clocks and timezone assumptions, order dependence from shared mutable state — a module-level global, a session-scoped fixture, a mutable default argument — races between async operations, unseeded randomness, port collisions, leftover database rows, and sleeping for a fixed duration instead of waiting for a condition. That last one is both slow and flaky, since the sleep always waits and sometimes still isn't long enough on a loaded CI box; the fix is `asyncio.wait_for` on the actual condition, or freezing the clock with `freezegun`. I'd run `pytest-randomly` to surface order dependence rather than guessing. The organizational answer matters as much as the technical one: a flaky test is a broken test. I'd quarantine it out of the required build immediately — a marker plus `pytest -m \"not quarantine\"` — so it stops training people to ignore red, file a ticket, and fix or delete it. Reaching for `pytest-rerunfailures` instead just hides it. Teams that let flakes accumulate stop believing CI, and then CI stops working — not technically, socially.",
     },
     {
       q: "What is the difference between an image and a container? And how is a container different from a VM?",
@@ -976,11 +1107,11 @@ Use **percentiles, not averages**. An average latency of 200ms is compatible wit
     },
     {
       q: "Why do Dockerfiles copy package.json before copying the source code?",
-      a: "Layer caching. Each instruction creates a layer, and on rebuild Docker reuses cached layers until the first one whose inputs changed, then rebuilds everything after it. Source files change every commit; dependencies rarely do. If I `COPY . .` before `npm ci`, then any one-character source edit invalidates the copy layer and forces a full reinstall on every build. By copying only the manifests, running the install, and copying source afterwards, the expensive install layer stays cached until the lockfile actually changes. It's a specific instance of the general rule: order Dockerfile instructions from least- to most-frequently-changing. I'd pair that with a multi-stage build so the toolchain and devDependencies never reach the runtime image — that's often the difference between a 1.2 GB image and a 200 MB one, which matters for pull time and CVE surface.",
+      a: "Layer caching — and the same reasoning applies to `pyproject.toml` and `uv.lock` in a Python image. Each instruction creates a layer, and on rebuild Docker reuses cached layers until the first one whose inputs changed, then rebuilds everything after it. Source files change every commit; dependencies rarely do. If I `COPY . .` before installing, then any one-character source edit invalidates the copy layer and forces a full reinstall on every build — which for Python means recompiling any package without a prebuilt wheel. By copying only the manifests, running `uv sync --frozen --no-install-project` (or `pip install -r requirements.lock`), and copying source afterwards, the expensive install layer stays cached until the lockfile actually changes. It's a specific instance of the general rule: order Dockerfile instructions from least- to most-frequently-changing. I'd pair that with a multi-stage build where the builder carries `build-essential` and the `-dev` headers and the runtime stage only receives the finished virtualenv — that's often the difference between a 1 GB image and a few hundred MB, which matters for pull time and CVE surface.",
     },
     {
       q: "What does a CI pipeline do, and what's the difference between continuous delivery and continuous deployment?",
-      a: "CI means everyone merges to a shared main frequently and every push is automatically built and tested, so integration problems surface in hours instead of at the end of a long branch. A typical pipeline checks out, installs with `npm ci` rather than `npm install` — `ci` respects the lockfile exactly and fails if it disagrees with package.json, so CI is actually testing what you tested — then lints, typechecks, runs unit and integration tests against a real Postgres service container, and builds the artifact. Cheapest checks first, so a missing semicolon doesn't cost five minutes. Continuous delivery means every green build produces an artifact that is deployable and a human clicks deploy. Continuous deployment means it deploys automatically with no human in the loop. Both depend on building the artifact once and promoting that same immutable image through environments, so staging tests something byte-identical to production.",
+      a: "CI means everyone merges to a shared main frequently and every push is automatically built and tested, so integration problems surface in hours instead of at the end of a long branch. A typical pipeline checks out, installs from the lockfile — `uv sync --frozen`, or `pip install --require-hashes -r requirements.lock` — rather than resolving fresh, because a frozen install fails loudly if the lock is stale instead of silently testing different versions than you did. Then it lints with `ruff`, typechecks with `mypy`, runs unit and integration tests with `pytest` against a real Postgres service container, and builds the artifact. Cheapest checks first, so an unused import doesn't cost five minutes. Continuous delivery means every green build produces an artifact that is deployable and a human clicks deploy. Continuous deployment means it deploys automatically with no human in the loop. Both depend on building the artifact once and promoting that same immutable image through environments, so staging tests something byte-identical to production.",
     },
     {
       q: "Compare blue-green and canary deployments.",
