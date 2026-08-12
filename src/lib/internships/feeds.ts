@@ -23,6 +23,13 @@ export const FEEDS: Feed[] = [
     cycle: "Summer 2026",
   },
   {
+    key: "simplify-summer-2027",
+    label: "SimplifyJobs · Summer 2027 Internships",
+    repo: "SimplifyJobs/Summer2027-Internships",
+    url: "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json",
+    cycle: "Summer 2027",
+  },
+  {
     key: "vansh-summer-2027",
     label: "vanshb03 · Summer 2027 Internships",
     repo: "vanshb03/Summer2027-Internships",
