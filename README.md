@@ -84,7 +84,6 @@ Internship listings are pulled from public community-maintained repos — their
 
 | Cycle | Repo |
 |---|---|
-| Summer 2026 | [SimplifyJobs/Summer2026-Internships](https://github.com/SimplifyJobs/Summer2026-Internships) |
 | Summer 2027 | [SimplifyJobs/Summer2027-Internships](https://github.com/SimplifyJobs/Summer2027-Internships) |
 | Summer 2027 | [vanshb03/Summer2027-Internships](https://github.com/vanshb03/Summer2027-Internships) |
 | New grad | [SimplifyJobs/New-Grad-Positions](https://github.com/SimplifyJobs/New-Grad-Positions) |

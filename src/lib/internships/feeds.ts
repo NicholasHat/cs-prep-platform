@@ -15,13 +15,9 @@ export interface Feed {
 }
 
 export const FEEDS: Feed[] = [
-  {
-    key: "simplify-summer-2026",
-    label: "SimplifyJobs · Summer 2026 Internships",
-    repo: "SimplifyJobs/Summer2026-Internships",
-    url: "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json",
-    cycle: "Summer 2026",
-  },
+  // SimplifyJobs renames its repo each cycle (Summer2026-Internships now
+  // 301-redirects to Summer2027-Internships), so only the current repo is
+  // listed — a renamed feed would silently duplicate it.
   {
     key: "simplify-summer-2027",
     label: "SimplifyJobs · Summer 2027 Internships",
