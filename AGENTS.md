@@ -48,7 +48,7 @@ already handles both repo shapes (`terms[]` vs a bare `season`).
 
 Every model call goes through `src/lib/ai/stream.ts` — the key is server-side
 only and routes must degrade to 503 when it's unset. New features use
-`claude-opus-4-8`; the notes assistant stays on Haiku deliberately.
+`claude-opus-5`; the notes assistant stays on Haiku deliberately.
 
 The cover-letter prompt forbids inventing facts and emits a trailing `NOTES`
 section for gaps instead. Don't relax that to make output smoother.

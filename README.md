@@ -102,8 +102,8 @@ clear message and the rest of the app works normally.
 | Route | Used by | Model |
 |---|---|---|
 | `/api/ai` | Notes assistant — summarize, quiz, clarify | `claude-haiku-4-5` (short, latency-sensitive) |
-| `/api/ai/cover-letter` | Tailors your base letter to one application | `claude-opus-4-8` |
-| `/api/ai/company-report` | Interview-loop rundown, cached per company | `claude-opus-4-8` |
+| `/api/ai/cover-letter` | Tailors your base letter to one application | `claude-opus-5` |
+| `/api/ai/company-report` | Interview-loop rundown, cached per company | `claude-opus-5` |
 
 The cover-letter prompt is instructed never to invent facts — if the posting
 wants something your letter and profile don't support, it says so in a trailing

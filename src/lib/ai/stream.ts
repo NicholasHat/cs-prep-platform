@@ -24,8 +24,10 @@ export function missingKeyResponse(): Response | null {
 export function streamText({
   system,
   user,
-  model = "claude-opus-4-8",
-  maxTokens = 8_000,
+  model = "claude-opus-5",
+  // Opus 5 thinks by default and thinking counts against max_tokens, so the
+  // budget leaves headroom beyond the visible response.
+  maxTokens = 16_000,
 }: StreamOptions): Response {
   const client = new Anthropic();
 
