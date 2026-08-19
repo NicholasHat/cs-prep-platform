@@ -178,8 +178,23 @@ a{color:var(--accent-fg)}
   border-bottom:1px solid var(--border)}
 .topbar a{color:var(--accent-fg);text-decoration:none;font-weight:600;font-size:.9rem;
   white-space:nowrap}
-#bar-title{font-size:.9rem;font-weight:600;color:var(--muted);overflow:hidden;
+#bar-title{flex:1;min-width:0;border:0;background:none;text-align:left;padding:.2rem 0;
+  font-size:.9rem;font-weight:600;color:var(--muted);cursor:pointer;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
+#bar-title::after{content:" ▾";color:var(--accent-fg)}
+.fontctl{display:flex;gap:.3rem;margin-left:auto}
+.fontctl button{border:1px solid var(--border);background:var(--card);color:var(--fg);
+  border-radius:8px;font-size:.72rem;font-weight:600;padding:.3rem .55rem;cursor:pointer;
+  white-space:nowrap}
+#bar-menu{position:fixed;top:3rem;left:.75rem;right:.75rem;z-index:20;
+  background:var(--card);border:1px solid var(--border);border-radius:12px;
+  box-shadow:0 8px 24px var(--shadow);max-height:60vh;overflow-y:auto;
+  padding:.4rem;display:flex;flex-direction:column;
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+#bar-menu[hidden]{display:none}
+#bar-menu a{padding:.5rem .6rem;border-radius:8px;text-decoration:none;color:var(--fg);
+  font-size:.9rem}
+#bar-menu a:active{background:var(--code-bg)}
 
 .view{display:none}
 .view.active{display:block}
@@ -276,6 +291,8 @@ td{font-variant-numeric:tabular-nums}
   color:var(--muted);font-weight:700;margin-bottom:.15rem}
 .pager .next{text-align:right}
 
+article p,article li,.answer p,.answer li,.weak p,.weak li{
+  -webkit-hyphens:auto;hyphens:auto}
 img,svg{max-width:100%}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 `;
@@ -341,10 +358,11 @@ const JS = `
     // navigating to "#" natively scrolls to top before hashchange fires.
     if (currentSlug) persistPos();
     for (i = 0; i < views.length; i++) views[i].classList.remove("active");
+    closeMenu();
     if (!chapter) {
       currentSlug = null;
       document.getElementById("home").classList.add("active");
-      barTitle.textContent = "";
+      barTitle.hidden = true;
       showResume();
       updateHome();
       window.scrollTo(0, 0);
@@ -353,6 +371,7 @@ const JS = `
     currentSlug = parts[0];
     chapter.classList.add("active");
     barTitle.textContent = chapter.getAttribute("data-title");
+    barTitle.hidden = false;
     setMarkLabel(currentSlug);
     store.set("handbook:last", parts[0]);
     store.set("handbook:lastTitle", chapter.getAttribute("data-title"));
@@ -390,6 +409,42 @@ const JS = `
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "hidden") flushExact();
   });
+
+  var barMenu = document.getElementById("bar-menu");
+  function closeMenu() {
+    barMenu.hidden = true;
+    barTitle.setAttribute("aria-expanded", "false");
+  }
+  barTitle.addEventListener("click", function () {
+    if (!barMenu.hidden) { closeMenu(); return; }
+    if (!currentSlug) return;
+    var nav = document.querySelector("#ch-" + currentSlug + " .section-nav nav");
+    if (!nav) return;
+    barMenu.innerHTML = nav.innerHTML;
+    barMenu.hidden = false;
+    barTitle.setAttribute("aria-expanded", "true");
+  });
+  barMenu.addEventListener("click", closeMenu);
+  document.addEventListener("click", function (e) {
+    if (barMenu.hidden) return;
+    if (e.target === barTitle || barMenu.contains(e.target)) return;
+    closeMenu();
+  });
+
+  var FONT_MIN = 14, FONT_MAX = 21;
+  var fontPx = parseInt(store.get("handbook:font"), 10);
+  if (fontPx >= FONT_MIN && fontPx <= FONT_MAX) {
+    document.documentElement.style.fontSize = fontPx + "px";
+  } else {
+    fontPx = 16;
+  }
+  function nudgeFont(delta) {
+    fontPx = Math.min(FONT_MAX, Math.max(FONT_MIN, fontPx + delta));
+    document.documentElement.style.fontSize = fontPx + "px";
+    store.set("handbook:font", String(fontPx));
+  }
+  document.getElementById("font-dec").addEventListener("click", function () { nudgeFont(-1); });
+  document.getElementById("font-inc").addEventListener("click", function () { nudgeFont(1); });
 
   var marks = document.querySelectorAll(".mark-read");
   for (var mi = 0; mi < marks.length; mi++) {
@@ -448,7 +503,12 @@ const JS = `
 function renderContent(): string {
   const chapterViews = CHAPTERS.map(renderChapter).join("\n");
   return `<style>${CSS}</style>
-<header class="topbar"><a href="#">☰ Contents</a><span id="bar-title"></span></header>
+<header class="topbar">
+<a class="home-link" href="#">☰ Contents</a>
+<button id="bar-title" type="button" hidden aria-expanded="false"></button>
+<div class="fontctl"><button id="font-dec" type="button" aria-label="Smaller text">A−</button><button id="font-inc" type="button" aria-label="Larger text">A+</button></div>
+</header>
+<nav id="bar-menu" hidden></nav>
 <main>
 ${renderHome()}
 ${chapterViews}
@@ -463,6 +523,10 @@ function standaloneWrap(content: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#faf9f6">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#12161b">
 <title>CS Interview Handbook</title>
 </head>
 <body>
