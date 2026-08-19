@@ -78,6 +78,7 @@ ${cards}
 <p id="progress" hidden></p>
 </div>
 <div id="resume" hidden><a id="resume-link" href="#"></a><button id="resume-dismiss" type="button" aria-label="Dismiss">×</button></div>
+<a class="drill-launch" href="#drill">Flashcard drill — ${CHAPTERS.reduce((n, c) => n + c.questions.length, 0)} questions, shuffled →</a>
 <input id="filter" type="search" placeholder="Filter chapters…" autocomplete="off">
 ${groups}
 </section>`;
@@ -100,11 +101,11 @@ ${md(s.markdown)}
     .join("\n");
 
   const questions = c.questions
-    .map((q) => {
+    .map((q, qi) => {
       const weak = q.weak
         ? `<div class="weak">${md(q.weak)}</div>`
         : "";
-      return `<details><summary>${mdInline(q.q)}</summary>
+      return `<details data-qid="${esc(c.slug)}:${qi}"><summary>${mdInline(q.q)}</summary>
 <div class="answer">${md(q.a)}</div>
 ${weak}</details>`;
     })
@@ -116,7 +117,7 @@ ${prev ? `<a class="prev" href="#${esc(prev.slug)}"><span>Previous</span>${esc(p
 ${next ? `<a class="next" href="#${esc(next.slug)}"><span>Next</span>${esc(next.title)}</a>` : `<a class="next" href="#"><span>Back to</span>Contents</a>`}
 </nav>`;
 
-  return `<section class="view chapter" id="ch-${esc(c.slug)}" data-title="${esc(c.title)}">
+  return `<section class="view chapter" id="ch-${esc(c.slug)}" data-title="${esc(c.title)}" data-track="${esc(track.label)}">
 <header class="chapter-head">
 <p class="eyebrow">${esc(track.label)} · ${c.estMinutes} min</p>
 <h1>${esc(c.title)}</h1>
@@ -134,6 +135,30 @@ ${questions}
 </div>
 <button class="mark-read" type="button" data-slug="${esc(c.slug)}">Mark chapter as read</button>
 ${pager}
+</section>`;
+}
+
+function renderDrill(): string {
+  const chips = TRACKS.map(
+    (t) => `<button type="button" data-track="${esc(t.label)}">${esc(t.label)}</button>`,
+  ).join("\n");
+  return `<section id="drill-view" class="view">
+<header class="chapter-head">
+<p class="eyebrow">Flashcards</p>
+<h1>Drill</h1>
+<p class="standfirst">Every question from every chapter, shuffled. “Again” re-queues a card for later in the deck and keeps it near the front next session.</p>
+</header>
+<div class="drill-filter" id="drill-tracks">
+<button type="button" class="active" data-track="">All tracks</button>
+${chips}
+</div>
+<p id="drill-progress"></p>
+<div id="drill-card" class="drill-card"></div>
+<div class="drill-actions">
+<button id="drill-show" type="button">Show answer</button>
+<button id="drill-again" type="button" hidden>Again</button>
+<button id="drill-got" type="button" hidden>Got it</button>
+</div>
 </section>`;
 }
 
@@ -156,7 +181,8 @@ html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--fg);overflow-x:hidden;
   font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
   font-size:1.0625rem;line-height:1.65}
-h1,h2,h3,h4,.topbar,.meta,.eyebrow,.blurb,.card p,.section-nav,.pager,summary,#filter,#resume{
+h1,h2,h3,h4,.topbar,.meta,.eyebrow,.blurb,.card p,.section-nav,.pager,summary,#filter,#resume,
+.drill-launch,.drill-filter,.drill-meta,.drill-q,.drill-actions,#drill-progress{
   font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 main{max-width:42rem;margin:0 auto;padding:0 1.125rem 5rem}
 h1{font-size:1.75rem;line-height:1.2;letter-spacing:-.015em;text-wrap:balance;margin:.25rem 0 .5rem}
@@ -182,6 +208,8 @@ a{color:var(--accent-fg)}
   font-size:.9rem;font-weight:600;color:var(--muted);cursor:pointer;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
 #bar-title::after{content:" ▾";color:var(--accent-fg)}
+#bar-title.nomenu{cursor:default}
+#bar-title.nomenu::after{content:""}
 .fontctl{display:flex;gap:.3rem;margin-left:auto}
 .fontctl button{border:1px solid var(--border);background:var(--card);color:var(--fg);
   border-radius:8px;font-size:.72rem;font-weight:600;padding:.3rem .55rem;cursor:pointer;
@@ -270,10 +298,10 @@ td{font-variant-numeric:tabular-nums}
   margin:.6rem 0}
 .questions summary{padding:.75rem 1rem;font-weight:600;font-size:.95rem;cursor:pointer;
   line-height:1.4}
-.questions .answer,.questions .weak{padding:0 1rem .75rem;font-size:.97rem}
-.questions .weak{margin:.25rem 1rem 1rem;padding:.1rem 1rem .6rem;
+.questions .answer,.weak{padding:0 1rem .75rem;font-size:.97rem}
+.weak{margin:.25rem 1rem 1rem;padding:.1rem 1rem .6rem;
   background:var(--warn-bg);border-left:3px solid var(--warn-border);border-radius:0 8px 8px 0}
-.questions .weak::before{content:"Weak answer";display:block;margin-top:.6rem;
+.weak::before{content:"Weak answer";display:block;margin-top:.6rem;
   text-transform:uppercase;letter-spacing:.08em;font-size:.68rem;font-weight:700;
   color:var(--warn-label);font-family:system-ui,-apple-system,sans-serif}
 
@@ -281,6 +309,30 @@ td{font-variant-numeric:tabular-nums}
   border:1px solid var(--accent);border-radius:12px;background:var(--card);
   color:var(--accent-fg);font-weight:600;font-size:.9rem;cursor:pointer}
 .mark-read.done{border-color:var(--border);color:var(--muted)}
+
+.drill-launch{display:block;margin:1.1rem 0 0;padding:.85rem 1rem;
+  border:1px solid var(--accent);border-radius:12px;background:var(--card);
+  color:var(--accent-fg);text-decoration:none;font-weight:600;font-size:.92rem;
+  box-shadow:0 1px 2px var(--shadow)}
+.drill-filter{display:flex;flex-wrap:wrap;gap:.4rem;margin:1.1rem 0 .75rem}
+.drill-filter button{border:1px solid var(--border);background:var(--card);color:var(--fg);
+  border-radius:999px;padding:.35rem .8rem;font-size:.8rem;cursor:pointer}
+.drill-filter button.active{border-color:var(--accent);color:var(--accent-fg);font-weight:600}
+#drill-progress{color:var(--muted);font-size:.85rem;font-weight:600;margin:0 0 .5rem;
+  font-variant-numeric:tabular-nums}
+.drill-card{border:1px solid var(--border);border-radius:14px;background:var(--card);
+  padding:1.1rem 1.2rem;margin:0 0 1rem;box-shadow:0 1px 2px var(--shadow)}
+.drill-meta{margin:0 0 .5rem;text-transform:uppercase;letter-spacing:.08em;font-size:.68rem;
+  font-weight:700;color:var(--accent-fg)}
+.drill-q{font-weight:600;font-size:1.02rem;line-height:1.45}
+.drill-a{border-top:1px solid var(--border);margin-top:1rem;padding-top:.25rem;font-size:.97rem}
+.drill-a .answer{padding:0}
+.drill-a .weak{margin:.75rem 0 0}
+.drill-actions{display:flex;gap:.7rem}
+.drill-actions button{flex:1;padding:.85rem;border-radius:12px;border:1px solid var(--border);
+  background:var(--card);font-weight:600;font-size:.95rem;cursor:pointer;color:var(--fg)}
+#drill-show,#drill-got{border-color:var(--accent);color:var(--accent-fg)}
+#drill-again{border-color:var(--warn-border);color:var(--warn-label)}
 
 .pager{display:flex;gap:.7rem;margin-top:2.5rem}
 .mark-read+.pager{margin-top:.7rem}
@@ -359,6 +411,16 @@ const JS = `
     if (currentSlug) persistPos();
     for (i = 0; i < views.length; i++) views[i].classList.remove("active");
     closeMenu();
+    if (parts[0] === "drill") {
+      currentSlug = null;
+      document.getElementById("drill-view").classList.add("active");
+      barTitle.textContent = "Drill";
+      barTitle.hidden = false;
+      barTitle.classList.add("nomenu");
+      drillEnter();
+      window.scrollTo(0, 0);
+      return;
+    }
     if (!chapter) {
       currentSlug = null;
       document.getElementById("home").classList.add("active");
@@ -372,6 +434,7 @@ const JS = `
     chapter.classList.add("active");
     barTitle.textContent = chapter.getAttribute("data-title");
     barTitle.hidden = false;
+    barTitle.classList.remove("nomenu");
     setMarkLabel(currentSlug);
     store.set("handbook:last", parts[0]);
     store.set("handbook:lastTitle", chapter.getAttribute("data-title"));
@@ -446,6 +509,119 @@ const JS = `
   document.getElementById("font-dec").addEventListener("click", function () { nudgeFont(-1); });
   document.getElementById("font-inc").addEventListener("click", function () { nudgeFont(1); });
 
+  var drill = { deck: [], i: 0, track: "", index: null };
+  var againState = loadJSON("handbook:drill");
+  var drillCard = document.getElementById("drill-card");
+  var drillProg = document.getElementById("drill-progress");
+  var btnShow = document.getElementById("drill-show");
+  var btnAgain = document.getElementById("drill-again");
+  var btnGot = document.getElementById("drill-got");
+
+  function drillIndex() {
+    if (drill.index) return drill.index;
+    drill.index = [];
+    var chapters = document.querySelectorAll(".chapter");
+    for (var i = 0; i < chapters.length; i++) {
+      var track = chapters[i].getAttribute("data-track");
+      var title = chapters[i].getAttribute("data-title");
+      var qs = chapters[i].querySelectorAll(".questions details");
+      for (var j = 0; j < qs.length; j++) {
+        drill.index.push({
+          id: qs[j].getAttribute("data-qid"),
+          track: track, chapter: title, el: qs[j]
+        });
+      }
+    }
+    return drill.index;
+  }
+  function shuffle(a) {
+    for (var i = a.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+  }
+  function startDeck() {
+    var all = drillIndex().filter(function (q) {
+      return !drill.track || q.track === drill.track;
+    });
+    var first = [], rest = [];
+    for (var i = 0; i < all.length; i++) (againState[all[i].id] ? first : rest).push(all[i]);
+    shuffle(first); shuffle(rest);
+    drill.deck = first.concat(rest);
+    drill.i = 0;
+    showCard();
+  }
+  function drillEnter() {
+    if (drill.deck.length) showCard();
+    else startDeck();
+  }
+  function showCard() {
+    if (drill.i >= drill.deck.length) {
+      drillProg.textContent = drill.deck.length + " cards done";
+      drillCard.innerHTML =
+        '<p class="drill-meta">Deck finished</p>' +
+        '<div class="drill-q">Nice work. Restart to reshuffle — cards you marked ' +
+        '“Again” will come first.</div>';
+      btnShow.textContent = "Restart";
+      btnShow.hidden = false; btnAgain.hidden = true; btnGot.hidden = true;
+      return;
+    }
+    var q = drill.deck[drill.i];
+    drillProg.textContent = (drill.i + 1) + " / " + drill.deck.length +
+      (drill.track ? " · " + drill.track : "");
+    var meta = document.createElement("p");
+    meta.className = "drill-meta";
+    meta.textContent = q.chapter;
+    var qdiv = document.createElement("div");
+    qdiv.className = "drill-q";
+    qdiv.innerHTML = q.el.querySelector("summary").innerHTML;
+    drillCard.innerHTML = "";
+    drillCard.appendChild(meta);
+    drillCard.appendChild(qdiv);
+    btnShow.textContent = "Show answer";
+    btnShow.hidden = false; btnAgain.hidden = true; btnGot.hidden = true;
+  }
+  btnShow.addEventListener("click", function () {
+    if (drill.i >= drill.deck.length) { startDeck(); return; }
+    var q = drill.deck[drill.i];
+    var back = document.createElement("div");
+    back.className = "drill-a";
+    var ans = q.el.querySelector(".answer");
+    if (ans) back.appendChild(ans.cloneNode(true));
+    var weak = q.el.querySelector(".weak");
+    if (weak) back.appendChild(weak.cloneNode(true));
+    drillCard.appendChild(back);
+    btnShow.hidden = true; btnAgain.hidden = false; btnGot.hidden = false;
+  });
+  btnAgain.addEventListener("click", function () {
+    var q = drill.deck[drill.i];
+    againState[q.id] = true;
+    saveJSON("handbook:drill", againState);
+    drill.deck.splice(Math.min(drill.i + 6, drill.deck.length), 0, q);
+    drill.i++;
+    window.scrollTo(0, 0);
+    showCard();
+  });
+  btnGot.addEventListener("click", function () {
+    var q = drill.deck[drill.i];
+    if (againState[q.id]) {
+      delete againState[q.id];
+      saveJSON("handbook:drill", againState);
+    }
+    drill.i++;
+    window.scrollTo(0, 0);
+    showCard();
+  });
+  document.getElementById("drill-tracks").addEventListener("click", function (e) {
+    var btn = e.target.closest("button");
+    if (!btn) return;
+    var chips = this.querySelectorAll("button");
+    for (var i = 0; i < chips.length; i++) chips[i].classList.remove("active");
+    btn.classList.add("active");
+    drill.track = btn.getAttribute("data-track");
+    startDeck();
+  });
+
   var marks = document.querySelectorAll(".mark-read");
   for (var mi = 0; mi < marks.length; mi++) {
     marks[mi].addEventListener("click", function () {
@@ -511,6 +687,7 @@ function renderContent(): string {
 <nav id="bar-menu" hidden></nav>
 <main>
 ${renderHome()}
+${renderDrill()}
 ${chapterViews}
 </main>
 <script>${JS}<\/script>`;
