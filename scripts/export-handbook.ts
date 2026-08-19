@@ -53,7 +53,7 @@ function renderHome(): string {
     const cards = CHAPTERS.filter((c) => c.track === track.id)
       .map((c) => {
         const search = [c.title, c.summary, ...c.tags].join(" ").toLowerCase();
-        return `<a class="card" href="#${esc(c.slug)}" data-search="${esc(search)}">
+        return `<a class="card" href="#${esc(c.slug)}" data-slug="${esc(c.slug)}" data-min="${c.estMinutes}" data-search="${esc(search)}">
 <h3>${esc(c.title)}</h3>
 <p>${esc(c.summary)}</p>
 <span class="meta">${c.estMinutes} min · ${c.tags.map(esc).join(" · ")}</span>
@@ -75,6 +75,7 @@ ${cards}
 <p class="eyebrow">CS Interview Prep</p>
 <h1>The Handbook</h1>
 <p class="standfirst">${CHAPTERS.length} chapters · ${Math.round(totalMinutes / 60)} hours of reading · ${CHAPTERS.reduce((n, c) => n + c.questions.length, 0)} drill questions</p>
+<p id="progress" hidden></p>
 </div>
 <div id="resume" hidden><a id="resume-link" href="#"></a><button id="resume-dismiss" type="button" aria-label="Dismiss">×</button></div>
 <input id="filter" type="search" placeholder="Filter chapters…" autocomplete="off">
@@ -131,6 +132,7 @@ ${sections}
 <h2>Drill questions (${c.questions.length})</h2>
 ${questions}
 </div>
+<button class="mark-read" type="button" data-slug="${esc(c.slug)}">Mark chapter as read</button>
 ${pager}
 </section>`;
 }
@@ -211,6 +213,11 @@ a{color:var(--accent-fg)}
 .card h3{margin:0;font-size:1.02rem}
 .card p{margin:.3rem 0 .45rem;font-size:.88rem;color:var(--muted);line-height:1.45}
 .card .meta{font-size:.75rem;color:var(--accent-fg);font-weight:600}
+.card.done{opacity:.72}
+.card.done h3::after{content:" ✓";color:var(--accent-fg)}
+#progress{color:var(--accent-fg);font-size:.85rem;font-weight:600;margin:.4rem 0 0;
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+#progress[hidden]{display:none}
 .card[hidden]{display:none}
 .track[hidden]{display:none}
 
@@ -255,7 +262,13 @@ td{font-variant-numeric:tabular-nums}
   text-transform:uppercase;letter-spacing:.08em;font-size:.68rem;font-weight:700;
   color:var(--warn-label);font-family:system-ui,-apple-system,sans-serif}
 
+.mark-read{display:block;width:100%;margin-top:2.25rem;padding:.75rem 1rem;
+  border:1px solid var(--accent);border-radius:12px;background:var(--card);
+  color:var(--accent-fg);font-weight:600;font-size:.9rem;cursor:pointer}
+.mark-read.done{border-color:var(--border);color:var(--muted)}
+
 .pager{display:flex;gap:.7rem;margin-top:2.5rem}
+.mark-read+.pager{margin-top:.7rem}
 .pager a{flex:1;padding:.8rem 1rem;border:1px solid var(--border);border-radius:12px;
   background:var(--card);text-decoration:none;color:var(--fg);font-weight:600;
   font-size:.9rem;line-height:1.35}
@@ -278,8 +291,45 @@ const JS = `
     set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
     del: function (k) { try { localStorage.removeItem(k); } catch (e) {} }
   };
+  function loadJSON(k) {
+    var v = store.get(k);
+    if (!v) return {};
+    try { return JSON.parse(v); } catch (e) { return {}; }
+  }
+  function saveJSON(k, obj) { store.set(k, JSON.stringify(obj)); }
 
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var currentSlug = null;
+  var restoreNext = false;
+  var positions = loadJSON("handbook:pos");
+  var readState = loadJSON("handbook:read");
+
+  function setMarkLabel(slug) {
+    var btn = document.querySelector('.mark-read[data-slug="' + slug + '"]');
+    if (!btn) return;
+    var done = !!readState[slug];
+    btn.textContent = done ? "✓ Read — tap to unmark" : "Mark chapter as read";
+    btn.classList.toggle("done", done);
+  }
+
+  function updateHome() {
+    var cards = document.querySelectorAll(".card");
+    var done = 0, minutesLeft = 0;
+    for (var i = 0; i < cards.length; i++) {
+      var isRead = !!readState[cards[i].getAttribute("data-slug")];
+      cards[i].classList.toggle("done", isRead);
+      if (isRead) done++;
+      else minutesLeft += parseInt(cards[i].getAttribute("data-min"), 10) || 0;
+    }
+    var el = document.getElementById("progress");
+    if (!done) { el.hidden = true; return; }
+    var left = minutesLeft >= 90
+      ? "~" + Math.round(minutesLeft / 60) + " h to go"
+      : minutesLeft + " min to go";
+    el.textContent = done + " of " + cards.length + " chapters read · " +
+      (minutesLeft ? left : "all done");
+    el.hidden = false;
+  }
 
   function route(animate) {
     var behavior = animate && !reduced ? "smooth" : "instant";
@@ -287,21 +337,68 @@ const JS = `
     var parts = hash.split("/");
     var chapter = parts[0] ? document.getElementById("ch-" + parts[0]) : null;
     var i;
+    // Persist the outgoing chapter's tracked position. Never read scrollY here:
+    // navigating to "#" natively scrolls to top before hashchange fires.
+    if (currentSlug) persistPos();
     for (i = 0; i < views.length; i++) views[i].classList.remove("active");
     if (!chapter) {
+      currentSlug = null;
       document.getElementById("home").classList.add("active");
       barTitle.textContent = "";
       showResume();
+      updateHome();
       window.scrollTo(0, 0);
       return;
     }
+    currentSlug = parts[0];
     chapter.classList.add("active");
     barTitle.textContent = chapter.getAttribute("data-title");
-    store.set("handbook:last", hash);
+    setMarkLabel(currentSlug);
+    store.set("handbook:last", parts[0]);
     store.set("handbook:lastTitle", chapter.getAttribute("data-title"));
     var section = parts[1] ? document.getElementById("sec-" + parts[0] + "-" + parts[1]) : null;
-    if (section) section.scrollIntoView({ behavior: behavior });
-    else window.scrollTo(0, 0);
+    if (section) {
+      section.scrollIntoView({ behavior: behavior });
+    } else if ((restoreNext || !animate) && positions[currentSlug]) {
+      window.scrollTo(0, positions[currentSlug]);
+    } else {
+      window.scrollTo(0, 0);
+    }
+    restoreNext = false;
+  }
+
+  var lastSavedY = 0;
+  function persistPos() { saveJSON("handbook:pos", positions); }
+  function flushExact() {
+    if (!currentSlug) return;
+    positions[currentSlug] = Math.round(window.scrollY);
+    persistPos();
+  }
+  window.addEventListener("scroll", function () {
+    if (!currentSlug) return;
+    var y = Math.round(window.scrollY);
+    positions[currentSlug] = y;
+    if (Math.abs(y - lastSavedY) > 300) { lastSavedY = y; persistPos(); }
+    if (y + window.innerHeight >= document.documentElement.scrollHeight - 400 &&
+        !readState[currentSlug]) {
+      readState[currentSlug] = true;
+      saveJSON("handbook:read", readState);
+      setMarkLabel(currentSlug);
+    }
+  }, { passive: true });
+  window.addEventListener("pagehide", flushExact);
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden") flushExact();
+  });
+
+  var marks = document.querySelectorAll(".mark-read");
+  for (var mi = 0; mi < marks.length; mi++) {
+    marks[mi].addEventListener("click", function () {
+      var slug = this.getAttribute("data-slug");
+      if (readState[slug]) delete readState[slug]; else readState[slug] = true;
+      saveJSON("handbook:read", readState);
+      setMarkLabel(slug);
+    });
   }
 
   function showResume() {
@@ -315,6 +412,10 @@ const JS = `
     link.querySelector("b").textContent = title;
     pill.hidden = false;
   }
+
+  document.getElementById("resume-link").addEventListener("click", function () {
+    restoreNext = true;
+  });
 
   document.getElementById("resume-dismiss").addEventListener("click", function () {
     store.del("handbook:last");
